@@ -1,4 +1,4 @@
-import { BallMaterial, LevelData, PlankInventory, WoodType } from './types';
+import { BallMaterial, LevelData } from './types';
 import { WORLD_WIDTH_NARROW, WORLD_WIDTH_WIDE, metersToPixels } from './economy';
 
 /**
@@ -23,7 +23,6 @@ interface LevelSpec {
     extraMeters?: number;
     dropDelayMs?: number;
   }[];
-  inventory: Partial<Record<WoodType, number>>;
   hint: string;
 }
 
@@ -31,14 +30,16 @@ interface LevelSpec {
  * How much force the cat survives, derived from the level's own impact energy
  * rather than hand-tuned per level.
  *
- * Measured on level 1: an unsheltered cat takes ~67 N, while a correct A-frame
- * cuts that to ~17 N. A base of 32 N therefore sits clearly between "a real
- * shelter held" and "the boulder got through". Later levels scale that budget
- * with their own energy so the same standard applies, using an exponent just
- * under 1 so difficulty still creeps up as boulders get heavier and faster.
+ * The exponent is measured, not guessed. Across the ten levels the energy proxy
+ * spans about 6.1x while the force actually reaching an unsheltered cat spans
+ * only about 2.2x (93 N to 206 N) — collisions shed energy rather than passing
+ * it through linearly, so force tracks roughly E^0.45. An exponent near 1 made
+ * late levels look forgiving on paper while still being unwinnable in practice.
+ * The base is set so tolerance lands near 35% of the unsheltered force:
+ * comfortably above what a sound shelter lets through, far below a direct hit.
  */
-const BASE_TOLERANCE = 32;
-const TOLERANCE_EXPONENT = 0.92;
+const BASE_TOLERANCE = 34;
+const TOLERANCE_EXPONENT = 0.45;
 
 /** Impact energy proxy: momentum at landing scales with sqrt(height) x mass. */
 function boulderEnergy(heightMeters: number, density: number, radius: number): number {
@@ -67,91 +68,94 @@ const LEVEL_SPECS: LevelSpec[] = [
     dropHeightMeters: 12,
     reward: 120,
     boulders: [{ material: 'stone', radius: 30, density: 0.005, offsetX: 0 }],
-    inventory: { PINE: 2, OAK: 2 },
-    hint: 'Angle your planks. A sloped roof deflects force sideways instead of absorbing it head-on.',
+    hint: 'Lean two planks into an A-frame and plant both feet on the ground.',
   },
   {
     title: 'Higher Ground',
-    description: 'Same boulder, 18 metres up. It arrives noticeably faster.',
+    description: 'The same boulder, now from 18 metres. It lands noticeably harder.',
     dropHeightMeters: 18,
-    reward: 180,
+    reward: 170,
     boulders: [{ material: 'stone', radius: 30, density: 0.005, offsetX: 0 }],
-    inventory: { PINE: 2, OAK: 2 },
-    hint: 'Every extra metre adds speed on impact. Brace the roof with a support underneath.',
+    hint: 'A steeper roof sheds force sideways instead of absorbing it.',
   },
   {
     title: 'Long Drop',
-    description: 'A 26 metre fall. Flat planks will snap under this much energy.',
-    dropHeightMeters: 26,
-    reward: 250,
+    description: 'Twenty-four metres, and a bigger stone. Pine will not survive this.',
+    dropHeightMeters: 24,
+    reward: 230,
     boulders: [{ material: 'stone', radius: 32, density: 0.006, offsetX: 0 }],
-    inventory: { PINE: 2, OAK: 2, IRONWOOD: 1 },
-    hint: 'Triangles are the strongest shape. Lean two planks together into an A-frame.',
+    hint: 'Oak holds where pine snaps. Spend a little more to lose fewer planks.',
+  },
+  {
+    title: 'Free Fall',
+    description: 'Thirty metres of open air above the cat.',
+    dropHeightMeters: 30,
+    reward: 300,
+    boulders: [{ material: 'stone', radius: 32, density: 0.006, offsetX: 0 }],
+    hint: 'The apex takes the hit. Put your strongest plank where the boulder lands.',
   },
   {
     title: 'Iron Sphere',
-    description: 'The boulder is now solid iron — far heavier at the same height.',
-    dropHeightMeters: 26,
-    reward: 320,
-    boulders: [{ material: 'iron', radius: 34, density: 0.012, offsetX: 0 }],
-    inventory: { PINE: 2, OAK: 2, IRONWOOD: 1 },
-    hint: 'Iron needs ironwood. Put your strongest plank where the impact lands.',
+    description: 'Solid iron. Twice the mass of stone at the same size.',
+    dropHeightMeters: 28,
+    reward: 380,
+    boulders: [{ material: 'iron', radius: 36, density: 0.015, offsetX: 0 }],
+    hint: 'Iron needs ironwood. Two strong planks beat four weak ones.',
   },
   {
     title: 'Iron From Above',
-    description: 'Iron, from 34 metres. The hardest single impact yet.',
+    description: 'Iron, from thirty-two metres. The hardest single impact yet.',
     dropHeightMeters: 34,
-    reward: 420,
-    boulders: [{ material: 'iron', radius: 34, density: 0.012, offsetX: 0 }],
-    inventory: { PINE: 2, OAK: 2, IRONWOOD: 2 },
-    hint: 'Stack two layers. The top layer can break as long as the second one holds.',
+    reward: 470,
+    boulders: [{ material: 'iron', radius: 38, density: 0.017, offsetX: 0 }],
+    hint: 'Keep the frame tight. A wide, shallow roof folds under this much energy.',
   },
   {
     title: 'Twin Drop',
-    description: 'Two stone boulders, seconds apart. The shelter has to survive both.',
-    dropHeightMeters: 30,
-    reward: 520,
+    description: 'Two stones, moments apart. The shelter has to survive both.',
+    dropHeightMeters: 32,
+    reward: 900,
     boulders: [
-      { material: 'stone', radius: 30, density: 0.006, offsetX: -55 },
-      { material: 'stone', radius: 32, density: 0.007, offsetX: 55, extraMeters: 3, dropDelayMs: 700 },
+      { material: 'stone', radius: 33, density: 0.010, offsetX: -48 },
+      { material: 'stone', radius: 34, density: 0.011, offsetX: 48, extraMeters: 3, dropDelayMs: 700 },
     ],
-    inventory: { PINE: 3, OAK: 2, IRONWOOD: 2 },
-    hint: 'A shelter that collapses on the first hit leaves the cat wide open for the second.',
+    hint: 'If the first hit flattens your roof, the second one lands on bare fur.',
+  },
+  {
+    title: 'Iron and Stone',
+    description: 'An iron core with stone on either flank.',
+    dropHeightMeters: 32,
+    reward: 1100,
+    boulders: [
+      { material: 'stone', radius: 30, density: 0.007, offsetX: -52 },
+      { material: 'iron', radius: 36, density: 0.014, offsetX: 0, extraMeters: 2, dropDelayMs: 550 },
+    ],
+    hint: 'Cover the centre first. The flanks glance off a well-angled roof.',
   },
   {
     title: 'Avalanche',
-    description: 'Three boulders across a wide spread, one of them iron.',
-    dropHeightMeters: 34,
-    reward: 650,
+    description: 'Three boulders across a wide spread.',
+    dropHeightMeters: 30,
+    reward: 1500,
     boulders: [
-      { material: 'stone', radius: 30, density: 0.006, offsetX: -80 },
+      { material: 'stone', radius: 30, density: 0.007, offsetX: -62 },
       { material: 'iron', radius: 34, density: 0.011, offsetX: 0, extraMeters: 2, dropDelayMs: 500 },
-      { material: 'stone', radius: 32, density: 0.007, offsetX: 80, extraMeters: 4, dropDelayMs: 1000 },
+      { material: 'stone', radius: 30, density: 0.007, offsetX: 62, extraMeters: 4, dropDelayMs: 1000 },
     ],
-    inventory: { PINE: 3, OAK: 3, IRONWOOD: 2 },
-    hint: 'Go wide. A narrow roof leaves the flanks exposed to the outer boulders.',
+    hint: 'Go wider than feels necessary. The outer stones find any exposed flank.',
   },
   {
     title: 'Terminal Velocity',
-    description: 'Iron from 45 metres. Everything you have learned, at full speed.',
-    dropHeightMeters: 45,
-    reward: 900,
+    description: 'Two iron spheres from forty-two metres. Everything you have learned.',
+    dropHeightMeters: 42,
+    reward: 1900,
     boulders: [
-      { material: 'iron', radius: 36, density: 0.013, offsetX: -40 },
-      { material: 'iron', radius: 36, density: 0.013, offsetX: 40, extraMeters: 5, dropDelayMs: 900 },
+      { material: 'iron', radius: 34, density: 0.012, offsetX: -35 },
+      { material: 'iron', radius: 34, density: 0.012, offsetX: 35, extraMeters: 5, dropDelayMs: 900 },
     ],
-    inventory: { PINE: 3, OAK: 3, IRONWOOD: 3 },
-    hint: 'Spend points on ironwood here. Anything lighter will not survive the first hit.',
+    hint: 'Ironwood only. Anything lighter is kindling at this speed.',
   },
 ];
-
-function buildInventory(partial: Partial<Record<WoodType, number>>): PlankInventory {
-  return {
-    PINE: partial.PINE ?? 0,
-    OAK: partial.OAK ?? 0,
-    IRONWOOD: partial.IRONWOOD ?? 0,
-  };
-}
 
 export const GAME_LEVELS: LevelData[] = LEVEL_SPECS.map((spec, index) => {
   const dropPixels = metersToPixels(spec.dropHeightMeters);
@@ -195,7 +199,6 @@ export const GAME_LEVELS: LevelData[] = LEVEL_SPECS.map((spec, index) => {
         dropDelayMs: b.dropDelayMs ?? 0,
       };
     }),
-    startingInventory: buildInventory(spec.inventory),
     defaultPlankWidth: 145,
     defaultPlankHeight: 18,
     hints: [spec.hint],

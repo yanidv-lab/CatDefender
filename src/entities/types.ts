@@ -105,17 +105,12 @@ export interface CatConfig {
   color?: string;
 }
 
-/** How many planks of each wood type the level hands the player for free. */
-export type PlankInventory = Record<WoodType, number>;
-
 export interface LevelData {
   id: number;
   title: string;
   description: string;
   cat: CatConfig;
   balls: BallConfig[];
-  /** Free planks granted at the start of this level, by wood type. */
-  startingInventory: PlankInventory;
   /** Drop height of the boulder above the ground, in metres. Drives world size. */
   dropHeightMeters: number;
   /** Points awarded for clearing this level. */

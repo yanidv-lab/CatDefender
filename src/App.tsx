@@ -249,6 +249,18 @@ export const App: React.FC = () => {
 
   const handleResetCamera = () => fitCameraToLevel(currentLevel);
 
+  // Dev-only automation hook used by the balance harness to play a level with a
+  // known shelter layout and read the outcome. Stripped from production builds.
+  if (import.meta.env.DEV) {
+    (window as any).__catTest = {
+      level: () => currentLevel,
+      loadLevel,
+      setPlanks: (planks: PlacedPlank[]) => syncPlanks(planks),
+      start: () => physicsEngineRef.current?.startDropSimulation(),
+      state: () => ({ gameState, stats: simulationStats, points, planks: placedPlanks.length }),
+    };
+  }
+
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-[#5FADD9] font-sans">
       {physicsEngineRef.current && (

@@ -432,8 +432,12 @@ export class PhysicsEngine {
     if (force < forceThreshold) return;
 
     const currentHealth = data.health ?? 100;
-    // Damage calculation
-    const damage = (force - forceThreshold) * 7.5;
+    // Damage is scaled so plank health actually means something. Real impacts in
+    // this game land between roughly 90 N and 200 N; at the old 7.5x multiplier
+    // that dealt 600-1500 damage, which shattered pine and ironwood alike on
+    // first contact and made material choice irrelevant. At 1.2x, oak (110 HP)
+    // gives way around 90 N while ironwood (200 HP) holds until about 170 N.
+    const damage = (force - forceThreshold) * 1.2;
     const newHealth = Math.max(0, currentHealth - damage);
     data.health = newHealth;
 

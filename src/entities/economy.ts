@@ -1,4 +1,4 @@
-import { PlankInventory, WOOD_MATERIALS, WoodType } from './types';
+import { WOOD_MATERIALS, WoodType } from './types';
 
 /**
  * World scale. Every level's drop height is authored in metres and converted to
@@ -39,14 +39,6 @@ export const EFFICIENCY_FALLOFF = 40;
 
 export function plankPrice(woodType: WoodType): number {
   return WOOD_MATERIALS[woodType].price;
-}
-
-export function emptyInventory(): PlankInventory {
-  return { PINE: 0, OAK: 0, IRONWOOD: 0 };
-}
-
-export function totalPlanks(inventory: PlankInventory): number {
-  return inventory.PINE + inventory.OAK + inventory.IRONWOOD;
 }
 
 /**
