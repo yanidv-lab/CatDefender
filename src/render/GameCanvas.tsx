@@ -39,6 +39,28 @@ const BOULDER_SPRITES = {
   iron: loadSprite('/assets/boulder_iron.png'),
 };
 const GROUND_SPRITE = loadSprite('/assets/ground_terrain.png');
+const PLANK_SPRITES: Record<WoodType, HTMLImageElement> = {
+  PINE: loadSprite('/assets/plank_pine.png'),
+  OAK: loadSprite('/assets/plank_oak.png'),
+  IRONWOOD: loadSprite('/assets/plank_ironwood.png'),
+};
+
+// Fills the current rounded-rect plank path (already begun by the caller) with the
+// wood-grain sprite for its material, clipped to the plank's own shape so it works
+// at any plank width/height. Falls back to the flat material color until the sprite
+// image has loaded (or if it fails to).
+function fillPlankTexture(ctx: CanvasRenderingContext2D, woodType: WoodType, w: number, h: number, fallbackColor: string) {
+  const sprite = PLANK_SPRITES[woodType] || PLANK_SPRITES.OAK;
+  if (isReady(sprite)) {
+    ctx.save();
+    ctx.clip();
+    ctx.drawImage(sprite, -w / 2, -h / 2, w, h);
+    ctx.restore();
+  } else {
+    ctx.fillStyle = fallbackColor;
+    ctx.fill();
+  }
+}
 
 interface DebrisParticle {
   x: number;
@@ -77,6 +99,23 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   const triggerShake = useCallback((intensity: number) => {
     shakeRef.current = Math.min(24, Math.max(shakeRef.current, intensity));
   }, []);
+
+  // Background clouds, scattered once per level so they hold still rather than
+  // re-randomizing every frame
+  const cloudsRef = useRef<{ x: number; y: number; scale: number; drift: number }[]>([]);
+  useEffect(() => {
+    const count = 5;
+    const clouds = [];
+    for (let i = 0; i < count; i++) {
+      clouds.push({
+        x: (currentLevel.worldWidth / count) * i + Math.random() * 80,
+        y: 40 + Math.random() * (currentLevel.groundY * 0.35),
+        scale: 0.7 + Math.random() * 0.8,
+        drift: 0.05 + Math.random() * 0.08,
+      });
+    }
+    cloudsRef.current = clouds;
+  }, [currentLevel.id, currentLevel.worldWidth, currentLevel.groundY]);
 
   // Register plank break listener on physics engine
   useEffect(() => {
@@ -180,11 +219,12 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       ctx.save();
       ctx.scale(dpr, dpr);
 
-      // Clear background (Clean Light Geometric Balance Canvas Background)
+      // Sky background — matches the claymation ground art's sky-blue tone instead
+      // of a flat white/pale panel, with a bit of depth toward the horizon.
       const skyGradient = ctx.createLinearGradient(0, 0, 0, height);
-      skyGradient.addColorStop(0, '#EAEFF9');
-      skyGradient.addColorStop(0.6, '#F3F4F9');
-      skyGradient.addColorStop(1, '#FFFFFF');
+      skyGradient.addColorStop(0, '#5FADD9');
+      skyGradient.addColorStop(0.55, '#8FCBEA');
+      skyGradient.addColorStop(1, '#D9EFFA');
       ctx.fillStyle = skyGradient;
       ctx.fillRect(0, 0, width, height);
 
@@ -203,8 +243,11 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       ctx.translate(panOffset.x + shakeX, panOffset.y + shakeY);
       ctx.scale(zoomLevel, zoomLevel);
 
-      // --- 1. DRAW WORLD BACKGROUND GRID / ENVIRONMENT ---
-      drawBackgroundGrid(ctx, currentLevel);
+      // --- 1. DRAW WORLD BACKGROUND: CLOUDS, PLACEMENT GRID (editing only) ---
+      drawClouds(ctx, cloudsRef.current);
+      if (gameState === 'EDITING') {
+        drawBackgroundGrid(ctx, currentLevel);
+      }
 
       // --- 2. DRAW GROUND ---
       drawGround(ctx, currentLevel);
@@ -405,7 +448,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
 function drawBackgroundGrid(ctx: CanvasRenderingContext2D, level: LevelData) {
   ctx.save();
-  ctx.strokeStyle = '#E1E2EC';
+  // Faint placement-aid grid, only shown while editing — subtle against the sky
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
   ctx.lineWidth = 1;
 
   const gridSize = 40;
@@ -421,6 +465,20 @@ function drawBackgroundGrid(ctx: CanvasRenderingContext2D, level: LevelData) {
     ctx.lineTo(level.worldWidth, y);
     ctx.stroke();
   }
+  ctx.restore();
+}
+
+function drawClouds(ctx: CanvasRenderingContext2D, clouds: { x: number; y: number; scale: number }[]) {
+  ctx.save();
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+  clouds.forEach((cloud) => {
+    const s = cloud.scale;
+    ctx.beginPath();
+    ctx.ellipse(cloud.x, cloud.y, 34 * s, 18 * s, 0, 0, Math.PI * 2);
+    ctx.ellipse(cloud.x + 30 * s, cloud.y + 4 * s, 26 * s, 15 * s, 0, 0, Math.PI * 2);
+    ctx.ellipse(cloud.x - 28 * s, cloud.y + 6 * s, 24 * s, 14 * s, 0, 0, Math.PI * 2);
+    ctx.fill();
+  });
   ctx.restore();
 }
 
@@ -629,17 +687,9 @@ function drawEditablePlank(ctx: CanvasRenderingContext2D, plank: PlacedPlank, is
   const mat = WOOD_MATERIALS[woodType] || WOOD_MATERIALS.OAK;
 
   // Wood Plank Body
-  ctx.fillStyle = mat.color;
   ctx.beginPath();
   ctx.roundRect(-w / 2, -h / 2, w, h, 6);
-  ctx.fill();
-
-  // Wood Grain subtle highlight line
-  ctx.strokeStyle = mat.grainColor;
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.moveTo(-w / 2 + 10, -h / 4); ctx.lineTo(w / 2 - 10, -h / 4);
-  ctx.stroke();
+  fillPlankTexture(ctx, woodType, w, h, mat.color);
 
   ctx.strokeStyle = mat.borderColor;
   ctx.lineWidth = 2.5;
@@ -720,17 +770,9 @@ function drawPhysicsPlank(
   const h = data.height || 18;
 
   // Wood Plank Body
-  ctx.fillStyle = mat.color;
   ctx.beginPath();
   ctx.roundRect(-w / 2, -h / 2, w, h, 6);
-  ctx.fill();
-
-  // Grain
-  ctx.strokeStyle = mat.grainColor;
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.moveTo(-w / 2 + 10, -h / 4); ctx.lineTo(w / 2 - 10, -h / 4);
-  ctx.stroke();
+  fillPlankTexture(ctx, woodType, w, h, mat.color);
 
   ctx.strokeStyle = mat.borderColor;
   ctx.lineWidth = 2.5;
@@ -766,10 +808,9 @@ function drawFragment(ctx: CanvasRenderingContext2D, fragBody: Matter.Body) {
   const woodType: WoodType = (data as any)?.woodType || 'OAK';
   const mat = WOOD_MATERIALS[woodType] || WOOD_MATERIALS.OAK;
 
-  ctx.fillStyle = mat.color;
   ctx.beginPath();
   ctx.roundRect(-w / 2, -h / 2, w, h, 4);
-  ctx.fill();
+  fillPlankTexture(ctx, woodType, w, h, mat.color);
 
   // Jagged fracture edge
   ctx.strokeStyle = mat.borderColor;
