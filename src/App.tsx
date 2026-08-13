@@ -3,7 +3,10 @@ import { PhysicsEngine, GameState, PlacedPlank } from './engine/physicsEngine';
 import { GAME_LEVELS } from './entities/levels';
 import { GameCanvas } from './render/GameCanvas';
 import { GameHUD } from './render/GameHUD';
-import { LevelData, SimulationStats, PlankDamageState, WoodType } from './entities/types';
+import { LevelData, SimulationStats, WoodType } from './entities/types';
+import { soundManager, SoundType } from './engine/soundEffects';
+import { triggerHaptic } from './engine/haptics';
+import { calculateStars } from './engine/scoring';
 
 export const App: React.FC = () => {
   // Persistent unlocked level progress state
@@ -46,6 +49,16 @@ export const App: React.FC = () => {
     timeElapsedSeconds: 0,
   });
 
+  // Per-level best star rating (1-3), persisted locally
+  const [levelStars, setLevelStars] = useState<Record<number, number>>(() => {
+    try {
+      const saved = localStorage.getItem('cat_defender_level_stars');
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+
   // Physics Engine Instance
   const physicsEngineRef = useRef<PhysicsEngine | null>(null);
 
@@ -55,18 +68,36 @@ export const App: React.FC = () => {
       onPlankDamageUpdate: () => {},
       onCatImpact: () => {},
       onStatsUpdate: (stats) => setSimulationStats(stats),
+      onSoundTrigger: (type: SoundType) => {
+        soundManager.play(type);
+        triggerHaptic(type);
+      },
     });
   }
 
-  // Unlock next level upon WIN
+  // Unlock next level & record star rating upon WIN
   useEffect(() => {
     if (gameState === 'WON') {
       const nextLevelId = currentLevel.id + 1;
       if (nextLevelId <= GAME_LEVELS.length && nextLevelId > maxUnlockedLevel) {
         setMaxUnlockedLevel(nextLevelId);
       }
+
+      const earnedStars = calculateStars(simulationStats, currentLevel);
+      setLevelStars((prev) => {
+        const best = Math.max(prev[currentLevel.id] || 0, earnedStars);
+        if (best === prev[currentLevel.id]) return prev;
+        const updated = { ...prev, [currentLevel.id]: best };
+        try {
+          localStorage.setItem('cat_defender_level_stars', JSON.stringify(updated));
+        } catch {
+          // ignore storage access errors
+        }
+        return updated;
+      });
     }
-  }, [gameState, currentLevel.id, maxUnlockedLevel]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gameState]);
 
   // Auto fit camera zoom to current level dimensions & screen size
   const fitCameraToLevel = useCallback((level: LevelData) => {
@@ -239,6 +270,7 @@ export const App: React.FC = () => {
         currentLevel={currentLevel}
         levelsList={GAME_LEVELS}
         maxUnlockedLevel={maxUnlockedLevel}
+        levelStars={levelStars}
         gameState={gameState}
         placedPlanks={placedPlanks}
         selectedPlankId={selectedPlankId}

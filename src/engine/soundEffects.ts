@@ -1,5 +1,7 @@
 // Web Audio API Sound Synthesizer for Cat Defender Physics Game
 
+export type SoundType = 'wood_impact' | 'wood_snap' | 'cat_hurt' | 'cat_win' | 'ball_drop' | 'ui_click';
+
 class SoundManager {
   private audioCtx: AudioContext | null = null;
   private soundEnabled: boolean = true;
@@ -24,7 +26,7 @@ class SoundManager {
     return this.soundEnabled;
   }
 
-  public play(type: 'wood_impact' | 'wood_snap' | 'cat_hurt' | 'cat_win' | 'ball_drop' | 'ui_click') {
+  public play(type: SoundType) {
     if (!this.soundEnabled) return;
     this.initCtx();
     if (!this.audioCtx) return;

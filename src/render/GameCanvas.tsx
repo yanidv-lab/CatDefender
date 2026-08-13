@@ -49,6 +49,12 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   // Particles for wooden debris scattering
   const particlesRef = useRef<DebrisParticle[]>([]);
 
+  // Screen shake magnitude in px, decays every frame in the render loop
+  const shakeRef = useRef<number>(0);
+  const triggerShake = useCallback((intensity: number) => {
+    shakeRef.current = Math.min(24, Math.max(shakeRef.current, intensity));
+  }, []);
+
   // Register plank break listener on physics engine
   useEffect(() => {
     physicsEngine.setOnPlankBreak((x, y, vx, vy, width, height) => {
@@ -80,8 +86,16 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       }
 
       particlesRef.current = [...particlesRef.current, ...newParticles];
+      triggerShake(10);
     });
-  }, [physicsEngine]);
+  }, [physicsEngine, triggerShake]);
+
+  // Register cat-impact listener to drive screen shake proportional to impact force
+  useEffect(() => {
+    physicsEngine.setOnCatImpact((force) => {
+      triggerShake(force * 1.4);
+    });
+  }, [physicsEngine, triggerShake]);
 
   // Clear particles when resetting to editing
   useEffect(() => {
@@ -151,9 +165,19 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       ctx.fillStyle = skyGradient;
       ctx.fillRect(0, 0, width, height);
 
-      // Apply Camera View Transforms (Zoom & Pan)
+      // Apply Camera View Transforms (Zoom & Pan) plus decaying impact shake
+      let shakeX = 0;
+      let shakeY = 0;
+      if (shakeRef.current > 0.05) {
+        shakeX = (Math.random() - 0.5) * shakeRef.current;
+        shakeY = (Math.random() - 0.5) * shakeRef.current;
+        shakeRef.current *= 0.88;
+      } else {
+        shakeRef.current = 0;
+      }
+
       ctx.save();
-      ctx.translate(panOffset.x, panOffset.y);
+      ctx.translate(panOffset.x + shakeX, panOffset.y + shakeY);
       ctx.scale(zoomLevel, zoomLevel);
 
       // --- 1. DRAW WORLD BACKGROUND GRID / ENVIRONMENT ---

@@ -20,15 +20,18 @@ import {
   Shield,
   Layers,
   Compass,
+  Star,
 } from 'lucide-react';
 import { GameState, PlacedPlank } from '../engine/physicsEngine';
 import { LevelData, SimulationStats, WoodType, WOOD_MATERIALS } from '../entities/types';
 import { soundManager } from '../engine/soundEffects';
+import { calculateStars } from '../engine/scoring';
 
 interface GameHUDProps {
   currentLevel: LevelData;
   levelsList: LevelData[];
   maxUnlockedLevel: number;
+  levelStars: Record<number, number>;
   gameState: GameState;
   placedPlanks: PlacedPlank[];
   selectedPlankId: string | null;
@@ -53,6 +56,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   currentLevel,
   levelsList,
   maxUnlockedLevel,
+  levelStars,
   gameState,
   placedPlanks,
   selectedPlankId,
@@ -83,6 +87,20 @@ export const GameHUD: React.FC<GameHUDProps> = ({
 
   const selectedPlank = placedPlanks.find((p) => p.id === selectedPlankId);
   const remainingPlanks = currentLevel.availablePlanksCount - placedPlanks.length;
+  const playClick = () => soundManager.play('ui_click');
+  const currentRunStars = gameState === 'WON' ? calculateStars(simulationStats, currentLevel) : 0;
+
+  const StarRow: React.FC<{ count: number; size?: number }> = ({ count, size = 22 }) => (
+    <div className="flex items-center justify-center gap-1">
+      {[1, 2, 3].map((i) => (
+        <Star
+          key={i}
+          style={{ width: size, height: size }}
+          className={i <= count ? 'text-[#FFB300] fill-[#FFB300]' : 'text-[#C4C6D0] fill-transparent'}
+        />
+      ))}
+    </div>
+  );
 
   return (
     <div className="absolute inset-0 pointer-events-none flex flex-col justify-between p-3 sm:p-4 select-none font-sans">
@@ -96,12 +114,16 @@ export const GameHUD: React.FC<GameHUDProps> = ({
             <div className="flex items-center gap-1.5">
               <select
                 value={currentLevel.id}
-                onChange={(e) => onSelectLevel(Number(e.target.value))}
+                onChange={(e) => {
+                  playClick();
+                  onSelectLevel(Number(e.target.value));
+                }}
                 className="bg-transparent text-[16px] font-semibold text-[#1B1B1F] leading-tight outline-none cursor-pointer hover:text-[#005AC1] transition"
               >
                 {levelsList.map((lvl) => (
                   <option key={lvl.id} value={lvl.id} className="bg-white text-[#1B1B1F]">
                     {lvl.title}
+                    {levelStars[lvl.id] ? ` ${'★'.repeat(levelStars[lvl.id])}` : ''}
                   </option>
                 ))}
               </select>
@@ -114,7 +136,10 @@ export const GameHUD: React.FC<GameHUDProps> = ({
         <div className="flex items-center gap-2">
           {/* Hint Button */}
           <button
-            onClick={() => setShowHintModal(true)}
+            onClick={() => {
+              playClick();
+              setShowHintModal(true);
+            }}
             className="w-10 h-10 flex items-center justify-center rounded-full bg-[#F3F4F9] text-[#005AC1] hover:bg-[#E1E2EC] active:scale-95 transition min-w-[40px] min-h-[40px]"
             title="Level Hint"
           >
@@ -147,21 +172,30 @@ export const GameHUD: React.FC<GameHUDProps> = ({
       {/* --- CAMERA CONTROLS (Right Floating Stack) --- */}
       <div className="absolute right-3 sm:right-5 top-24 flex flex-col gap-2 pointer-events-auto">
         <button
-          onClick={onZoomIn}
+          onClick={() => {
+            playClick();
+            onZoomIn();
+          }}
           className="w-10 h-10 rounded-full bg-white border border-[#E1E2EC] text-[#005AC1] flex items-center justify-center hover:bg-[#F3F4F9] active:scale-95 transition shadow-sm min-w-[40px] min-h-[40px]"
           title="Zoom In"
         >
           <ZoomIn className="w-5 h-5" />
         </button>
         <button
-          onClick={onZoomOut}
+          onClick={() => {
+            playClick();
+            onZoomOut();
+          }}
           className="w-10 h-10 rounded-full bg-white border border-[#E1E2EC] text-[#005AC1] flex items-center justify-center hover:bg-[#F3F4F9] active:scale-95 transition shadow-sm min-w-[40px] min-h-[40px]"
           title="Zoom Out"
         >
           <ZoomOut className="w-5 h-5" />
         </button>
         <button
-          onClick={onResetCamera}
+          onClick={() => {
+            playClick();
+            onResetCamera();
+          }}
           className="w-10 h-10 rounded-full bg-white border border-[#E1E2EC] text-[#005AC1] flex items-center justify-center hover:bg-[#F3F4F9] active:scale-95 transition shadow-sm min-w-[40px] min-h-[40px]"
           title="Reset View"
         >
@@ -183,6 +217,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
               <button
                 key={wType}
                 onClick={() => {
+                  playClick();
                   onSelectWoodType(wType);
                   if (selectedPlank && onUpdatePlankWoodType) {
                     onUpdatePlankWoodType(selectedPlank.id, wType);
@@ -209,7 +244,10 @@ export const GameHUD: React.FC<GameHUDProps> = ({
       {gameState === 'EDITING' && selectedPlank && (
         <div className="self-center mb-3 pointer-events-auto bg-white border-2 border-[#C4C6D0] rounded-3xl p-2.5 sm:p-3 shadow-xl flex items-center justify-center gap-3 sm:gap-4 max-w-full overflow-x-auto">
           <button
-            onClick={() => onRotatePlankStep(selectedPlank.id, -15)}
+            onClick={() => {
+              playClick();
+              onRotatePlankStep(selectedPlank.id, -15);
+            }}
             className="flex flex-col items-center gap-1 group active:scale-95 transition min-w-[50px]"
           >
             <div className="w-11 h-8 bg-[#DDE1FF] rounded-full flex items-center justify-center text-[#001453]">
@@ -219,7 +257,10 @@ export const GameHUD: React.FC<GameHUDProps> = ({
           </button>
 
           <button
-            onClick={() => onRotatePlankStep(selectedPlank.id, 15)}
+            onClick={() => {
+              playClick();
+              onRotatePlankStep(selectedPlank.id, 15);
+            }}
             className="flex flex-col items-center gap-1 group active:scale-95 transition min-w-[50px]"
           >
             <div className="w-11 h-8 bg-[#DDE1FF] rounded-full flex items-center justify-center text-[#001453]">
@@ -229,7 +270,10 @@ export const GameHUD: React.FC<GameHUDProps> = ({
           </button>
 
           <button
-            onClick={() => onSetPlankAngle(selectedPlank.id, 0)}
+            onClick={() => {
+              playClick();
+              onSetPlankAngle(selectedPlank.id, 0);
+            }}
             className="flex flex-col items-center gap-1 group active:scale-95 transition min-w-[50px]"
           >
             <div className="w-11 h-8 bg-[#F3F4F9] hover:bg-[#E1E2EC] rounded-full flex items-center justify-center text-[#005AC1] text-xs font-bold">
@@ -239,7 +283,10 @@ export const GameHUD: React.FC<GameHUDProps> = ({
           </button>
 
           <button
-            onClick={() => onSetPlankAngle(selectedPlank.id, 45)}
+            onClick={() => {
+              playClick();
+              onSetPlankAngle(selectedPlank.id, 45);
+            }}
             className="flex flex-col items-center gap-1 group active:scale-95 transition min-w-[50px]"
           >
             <div className="w-11 h-8 bg-[#F3F4F9] hover:bg-[#E1E2EC] rounded-full flex items-center justify-center text-[#005AC1] text-xs font-bold">
@@ -251,7 +298,10 @@ export const GameHUD: React.FC<GameHUDProps> = ({
           <div className="w-px h-8 bg-[#E1E2EC] mx-0.5" />
 
           <button
-            onClick={() => onRemovePlank(selectedPlank.id)}
+            onClick={() => {
+              playClick();
+              onRemovePlank(selectedPlank.id);
+            }}
             className="flex flex-col items-center gap-1 group active:scale-95 transition min-w-[50px]"
             title="Delete Plank"
           >
@@ -269,7 +319,10 @@ export const GameHUD: React.FC<GameHUDProps> = ({
           <>
             {/* Reset / Add Plank outline button */}
             <button
-              onClick={onAddPlank}
+              onClick={() => {
+                playClick();
+                onAddPlank();
+              }}
               disabled={remainingPlanks <= 0}
               className={`flex-1 h-12 sm:h-14 rounded-full border border-[#74777F] font-semibold text-sm sm:text-base flex items-center justify-center gap-2 active:bg-[#F3F4F9] transition ${
                 remainingPlanks > 0
@@ -304,7 +357,10 @@ export const GameHUD: React.FC<GameHUDProps> = ({
             </div>
 
             <button
-              onClick={onResetLevel}
+              onClick={() => {
+                playClick();
+                onResetLevel();
+              }}
               className="h-12 px-6 rounded-full border border-[#74777F] text-[#005AC1] font-semibold text-sm flex items-center justify-center gap-2 active:bg-[#F3F4F9] transition"
             >
               <RotateCcw className="w-4 h-4" /> Reset / Edit
@@ -357,6 +413,8 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                   <p className="text-sm text-[#44474F] mt-1">Your wooden shelter held strong against the falling impact.</p>
                 </div>
 
+                <StarRow count={currentRunStars} size={32} />
+
                 {/* Physics Stats Card */}
                 <div className="bg-[#F3F4F9] border border-[#E1E2EC] rounded-2xl p-4 text-left space-y-2 text-xs sm:text-sm text-[#44474F]">
                   <div className="flex justify-between">
@@ -375,27 +433,39 @@ export const GameHUD: React.FC<GameHUDProps> = ({
 
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 pt-2">
                   <button
-                    onClick={onReplay || onResetLevel}
+                    onClick={() => {
+                      playClick();
+                      (onReplay || onResetLevel)();
+                    }}
                     className="h-12 border-2 border-[#005AC1] text-[#005AC1] hover:bg-[#005AC1]/10 font-bold rounded-full transition active:scale-95 flex items-center justify-center gap-1.5 text-xs sm:text-sm cursor-pointer"
                   >
                     <RotateCcw className="w-4 h-4" /> Replay
                   </button>
                   <button
-                    onClick={onResetLevel}
+                    onClick={() => {
+                      playClick();
+                      onResetLevel();
+                    }}
                     className="h-12 border border-[#74777F] text-[#44474F] hover:bg-[#F3F4F9] font-semibold rounded-full transition active:scale-95 flex items-center justify-center gap-1.5 text-xs sm:text-sm cursor-pointer"
                   >
                     Edit / Rebuild
                   </button>
                   {currentLevel.id < levelsList.length ? (
                     <button
-                      onClick={() => onSelectLevel(currentLevel.id + 1)}
+                      onClick={() => {
+                        playClick();
+                        onSelectLevel(currentLevel.id + 1);
+                      }}
                       className="col-span-2 sm:col-span-1 h-12 flex items-center justify-center gap-1.5 bg-[#005AC1] hover:bg-[#004395] text-white font-bold rounded-full transition active:scale-95 shadow-md text-xs sm:text-sm cursor-pointer"
                     >
                       Next Level <ChevronRight className="w-4 h-4" />
                     </button>
                   ) : (
                     <button
-                      onClick={() => onSelectLevel(1)}
+                      onClick={() => {
+                        playClick();
+                        onSelectLevel(1);
+                      }}
                       className="col-span-2 sm:col-span-1 h-12 bg-[#005AC1] hover:bg-[#004395] text-white font-bold rounded-full transition active:scale-95 shadow-md text-xs sm:text-sm cursor-pointer"
                     >
                       Play Again
@@ -429,7 +499,10 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                 </div>
 
                 <button
-                  onClick={onResetLevel}
+                  onClick={() => {
+                    playClick();
+                    onResetLevel();
+                  }}
                   className="w-full h-12 flex items-center justify-center gap-2 bg-[#005AC1] hover:bg-[#004395] text-white font-bold rounded-full transition active:scale-95 shadow-md"
                 >
                   <RotateCcw className="w-5 h-5" /> Try Again & Rebuild

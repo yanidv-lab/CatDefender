@@ -63,6 +63,10 @@ export class PhysicsEngine {
     this.callbacks.onPlankBreak = fn;
   }
 
+  public setOnCatImpact(fn: (force: number) => void) {
+    this.callbacks.onCatImpact = fn;
+  }
+
   public initLevel(level: LevelData, userPlanks: PlacedPlank[]) {
     this.stopSimulation();
     this.currentLevel = level;
