@@ -1,0 +1,732 @@
+import React, { useRef, useEffect, useState, useCallback } from 'react';
+import Matter from 'matter-js';
+import { PhysicsEngine, GameState, PlacedPlank } from '../engine/physicsEngine';
+import { LevelData, PlankDamageState, WOOD_MATERIALS, WoodType } from '../entities/types';
+
+interface GameCanvasProps {
+  physicsEngine: PhysicsEngine;
+  currentLevel: LevelData;
+  gameState: GameState;
+  placedPlanks: PlacedPlank[];
+  selectedPlankId: string | null;
+  onSelectPlank: (id: string | null) => void;
+  onUpdatePlankPosition: (id: string, x: number, y: number) => void;
+  onUpdatePlankAngle: (id: string, angle: number) => void;
+  zoomLevel: number;
+  panOffset: { x: number; y: number };
+  onPanChange: (offset: { x: number; y: number }) => void;
+}
+
+interface DebrisParticle {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  w: number;
+  h: number;
+  angle: number;
+  vAngle: number;
+  color: string;
+  life: number;
+}
+
+export const GameCanvas: React.FC<GameCanvasProps> = ({
+  physicsEngine,
+  currentLevel,
+  gameState,
+  placedPlanks,
+  selectedPlankId,
+  onSelectPlank,
+  onUpdatePlankPosition,
+  onUpdatePlankAngle,
+  zoomLevel,
+  panOffset,
+  onPanChange,
+}) => {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  // Particles for wooden debris scattering
+  const particlesRef = useRef<DebrisParticle[]>([]);
+
+  // Register plank break listener on physics engine
+  useEffect(() => {
+    physicsEngine.setOnPlankBreak((x, y, vx, vy, width, height) => {
+      const newParticles: DebrisParticle[] = [];
+      const count = 26;
+      const woodColors = ['#795548', '#8D6E63', '#5D4037', '#3E2723', '#D7CCC8', '#A1887F'];
+
+      for (let i = 0; i < count; i++) {
+        const offsetX = (Math.random() - 0.5) * (width * 0.8);
+        const offsetY = (Math.random() - 0.5) * (height * 1.2);
+
+        // Inherit impact velocity plus random directional scatter impulse
+        const speedScale = 0.35;
+        const blastX = (Math.random() - 0.5) * 8;
+        const blastY = -Math.random() * 6 - 2;
+
+        newParticles.push({
+          x: x + offsetX,
+          y: y + offsetY,
+          vx: vx * speedScale + blastX,
+          vy: vy * speedScale + blastY,
+          w: 3 + Math.random() * 8,
+          h: 2 + Math.random() * 5,
+          angle: Math.random() * Math.PI * 2,
+          vAngle: (Math.random() - 0.5) * 0.4,
+          color: woodColors[Math.floor(Math.random() * woodColors.length)],
+          life: 1.0,
+        });
+      }
+
+      particlesRef.current = [...particlesRef.current, ...newParticles];
+    });
+  }, [physicsEngine]);
+
+  // Clear particles when resetting to editing
+  useEffect(() => {
+    if (gameState === 'EDITING') {
+      particlesRef.current = [];
+    }
+  }, [gameState]);
+
+  // Dragging state
+  const [isDraggingPlank, setIsDraggingPlank] = useState(false);
+  const [isRotatingPlank, setIsRotatingPlank] = useState(false);
+  const [isPanning, setIsPanning] = useState(false);
+  const [dragStartPos, setDragStartPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [plankStartPos, setPlankStartPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [initialAngle, setInitialAngle] = useState(0);
+
+  // Touch gesture state
+  const touchStartDistRef = useRef<number | null>(null);
+  const touchStartAngleRef = useRef<number | null>(null);
+
+  // Convert screen coordinates to canvas world coordinates
+  const screenToWorld = useCallback(
+    (screenX: number, screenY: number) => {
+      const canvas = canvasRef.current;
+      if (!canvas) return { x: screenX, y: screenY };
+      const rect = canvas.getBoundingClientRect();
+      const rawX = screenX - rect.left;
+      const rawY = screenY - rect.top;
+
+      // Adjust for pan and zoom
+      const worldX = (rawX - panOffset.x) / zoomLevel;
+      const worldY = (rawY - panOffset.y) / zoomLevel;
+
+      return { x: worldX, y: worldY };
+    },
+    [panOffset, zoomLevel]
+  );
+
+  // Main Render Loop
+  useEffect(() => {
+    let animId: number;
+
+    const render = () => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      // Handle high DPI crisp canvas sizing
+      const dpr = window.devicePixelRatio || 1;
+      const width = canvas.clientWidth;
+      const height = canvas.clientHeight;
+
+      if (canvas.width !== width * dpr || canvas.height !== height * dpr) {
+        canvas.width = width * dpr;
+        canvas.height = height * dpr;
+      }
+
+      ctx.save();
+      ctx.scale(dpr, dpr);
+
+      // Clear background (Clean Light Geometric Balance Canvas Background)
+      const skyGradient = ctx.createLinearGradient(0, 0, 0, height);
+      skyGradient.addColorStop(0, '#EAEFF9');
+      skyGradient.addColorStop(0.6, '#F3F4F9');
+      skyGradient.addColorStop(1, '#FFFFFF');
+      ctx.fillStyle = skyGradient;
+      ctx.fillRect(0, 0, width, height);
+
+      // Apply Camera View Transforms (Zoom & Pan)
+      ctx.save();
+      ctx.translate(panOffset.x, panOffset.y);
+      ctx.scale(zoomLevel, zoomLevel);
+
+      // --- 1. DRAW WORLD BACKGROUND GRID / ENVIRONMENT ---
+      drawBackgroundGrid(ctx, currentLevel);
+
+      // --- 2. DRAW GROUND ---
+      drawGround(ctx, currentLevel);
+
+      // --- 3. DRAW GAME BODIES FROM PHYSICS ENGINE ---
+      const bodies = physicsEngine.getPhysicsBodies();
+
+      // Draw Balls
+      bodies.ballBodies.forEach((ball) => {
+        drawBall(ctx, ball);
+      });
+
+      // Draw Cat
+      if (bodies.catBody) {
+        drawCat(ctx, bodies.catBody, gameState);
+      }
+
+      // Draw Planks (In EDITING mode or SIMULATING mode)
+      if (gameState === 'EDITING') {
+        // Draw user placed planks with interactive handles
+        placedPlanks.forEach((plank) => {
+          const isSelected = plank.id === selectedPlankId;
+          drawEditablePlank(ctx, plank, isSelected);
+        });
+      } else {
+        // Draw physics bodies & damage
+        bodies.plankBodies.forEach((plankBody) => {
+          drawPhysicsPlank(ctx, plankBody, bodies.plankDamageStates);
+        });
+
+        // Draw Snapped Fragments
+        bodies.fragmentBodies.forEach((fragBody) => {
+          drawFragment(ctx, fragBody);
+        });
+      }
+
+      // --- 4. DRAW & UPDATE WOODEN DEBRIS PARTICLES ---
+      if (particlesRef.current.length > 0) {
+        const gravity = 0.25;
+        const nextParticles: DebrisParticle[] = [];
+
+        for (let i = 0; i < particlesRef.current.length; i++) {
+          const p = particlesRef.current[i];
+          p.x += p.vx;
+          p.y += p.vy;
+          p.vy += gravity;
+          p.angle += p.vAngle;
+          p.life -= 0.022;
+
+          if (p.life > 0) {
+            nextParticles.push(p);
+
+            ctx.save();
+            ctx.translate(p.x, p.y);
+            ctx.rotate(p.angle);
+            ctx.globalAlpha = Math.max(0, p.life);
+            ctx.fillStyle = p.color;
+            ctx.beginPath();
+            ctx.roundRect(-p.w / 2, -p.h / 2, p.w, p.h, 1);
+            ctx.fill();
+            ctx.restore();
+          }
+        }
+
+        particlesRef.current = nextParticles;
+      }
+
+      ctx.restore(); // Restore camera transform
+
+      ctx.restore(); // Restore dpr transform
+
+      animId = requestAnimationFrame(render);
+    };
+
+    render();
+
+    return () => {
+      cancelAnimationFrame(animId);
+    };
+  }, [physicsEngine, currentLevel, gameState, placedPlanks, selectedPlankId, zoomLevel, panOffset]);
+
+  // Mouse / Touch Event Handlers for Placing, Moving, Rotating Planks
+  const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (gameState !== 'EDITING') return;
+
+    const worldPos = screenToWorld(e.clientX, e.clientY);
+
+    // 1. Check if clicked on a plank rotate handle
+    if (selectedPlankId) {
+      const selectedPlank = placedPlanks.find((p) => p.id === selectedPlankId);
+      if (selectedPlank) {
+        const handleDist = getRotateHandlePos(selectedPlank);
+        const dist = Math.hypot(worldPos.x - handleDist.x, worldPos.y - handleDist.y);
+        if (dist <= 22) {
+          setIsRotatingPlank(true);
+          setDragStartPos({ x: worldPos.x, y: worldPos.y });
+          const initialRad = Math.atan2(worldPos.y - selectedPlank.y, worldPos.x - selectedPlank.x);
+          setInitialAngle(selectedPlank.angle - initialRad);
+          return;
+        }
+      }
+    }
+
+    // 2. Check if clicked on any plank body
+    let hitPlank: PlacedPlank | null = null;
+    for (let i = placedPlanks.length - 1; i >= 0; i--) {
+      const p = placedPlanks[i];
+      if (isPointInsidePlank(worldPos.x, worldPos.y, p)) {
+        hitPlank = p;
+        break;
+      }
+    }
+
+    if (hitPlank) {
+      onSelectPlank(hitPlank.id);
+      setIsDraggingPlank(true);
+      setDragStartPos({ x: worldPos.x, y: worldPos.y });
+      setPlankStartPos({ x: hitPlank.x, y: hitPlank.y });
+    } else {
+      // Clicked on empty space -> deselect plank, start canvas panning
+      onSelectPlank(null);
+      setIsPanning(true);
+      setDragStartPos({ x: e.clientX, y: e.clientY });
+    }
+  };
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (gameState !== 'EDITING') return;
+
+    if (isRotatingPlank && selectedPlankId) {
+      const selectedPlank = placedPlanks.find((p) => p.id === selectedPlankId);
+      if (selectedPlank) {
+        const worldPos = screenToWorld(e.clientX, e.clientY);
+        const newRad = Math.atan2(worldPos.y - selectedPlank.y, worldPos.x - selectedPlank.x);
+        let finalAngle = newRad + initialAngle;
+
+        // Snap to nearest 15 deg if close
+        const degrees = (finalAngle * 180) / Math.PI;
+        const snapDegrees = Math.round(degrees / 15) * 15;
+        if (Math.abs(degrees - snapDegrees) < 4) {
+          finalAngle = (snapDegrees * Math.PI) / 180;
+        }
+
+        onUpdatePlankAngle(selectedPlankId, finalAngle);
+      }
+    } else if (isDraggingPlank && selectedPlankId) {
+      const worldPos = screenToWorld(e.clientX, e.clientY);
+      const deltaX = worldPos.x - dragStartPos.x;
+      const deltaY = worldPos.y - dragStartPos.y;
+
+      let newX = plankStartPos.x + deltaX;
+      let newY = plankStartPos.y + deltaY;
+
+      // Clamp within world boundaries
+      newX = Math.max(40, Math.min(currentLevel.worldWidth - 40, newX));
+      newY = Math.max(60, Math.min(currentLevel.groundY - 10, newY));
+
+      onUpdatePlankPosition(selectedPlankId, newX, newY);
+    } else if (isPanning) {
+      const deltaX = e.clientX - dragStartPos.x;
+      const deltaY = e.clientY - dragStartPos.y;
+      onPanChange({ x: panOffset.x + deltaX, y: panOffset.y + deltaY });
+      setDragStartPos({ x: e.clientX, y: e.clientY });
+    }
+  };
+
+  const handlePointerUp = () => {
+    setIsDraggingPlank(false);
+    setIsRotatingPlank(false);
+    setIsPanning(false);
+    touchStartDistRef.current = null;
+    touchStartAngleRef.current = null;
+  };
+
+  // Wheel Zoom
+  const handleWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+  };
+
+  return (
+    <div ref={containerRef} className="relative w-full h-full overflow-hidden bg-[#F3F4F9] select-none p-2 sm:p-4">
+      <div className="w-full h-full rounded-[32px] border-2 border-[#C4C6D0] bg-white overflow-hidden shadow-inner relative">
+        <canvas
+          ref={canvasRef}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerLeave={handlePointerUp}
+          onWheel={handleWheel}
+          className="w-full h-full cursor-grab active:cursor-grabbing touch-none block"
+        />
+      </div>
+    </div>
+  );
+};
+
+// --- RENDER HELPER DRAWING FUNCTIONS ---
+
+function drawBackgroundGrid(ctx: CanvasRenderingContext2D, level: LevelData) {
+  ctx.save();
+  ctx.strokeStyle = '#E1E2EC';
+  ctx.lineWidth = 1;
+
+  const gridSize = 40;
+  for (let x = 0; x < level.worldWidth; x += gridSize) {
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, level.worldHeight);
+    ctx.stroke();
+  }
+  for (let y = 0; y < level.worldHeight; y += gridSize) {
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(level.worldWidth, y);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawGround(ctx: CanvasRenderingContext2D, level: LevelData) {
+  ctx.save();
+  const groundY = level.groundY;
+  const groundHeight = 120;
+
+  // Primary ground accent line
+  ctx.fillStyle = '#005AC1';
+  ctx.fillRect(0, groundY - 2, level.worldWidth, 4);
+
+  // Ground base surface
+  ctx.fillStyle = '#D1D1D1';
+  ctx.fillRect(0, groundY + 2, level.worldWidth, groundHeight);
+
+  // Border line
+  ctx.strokeStyle = '#A0A0A0';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(0, groundY + 2);
+  ctx.lineTo(level.worldWidth, groundY + 2);
+  ctx.stroke();
+
+  // Geometric ground accent pattern
+  ctx.fillStyle = '#C4C6D0';
+  for (let x = 30; x < level.worldWidth; x += 80) {
+    ctx.fillRect(x, groundY + 20, 24, 12);
+  }
+
+  ctx.restore();
+}
+
+function drawBall(ctx: CanvasRenderingContext2D, ball: Matter.Body) {
+  ctx.save();
+  ctx.translate(ball.position.x, ball.position.y);
+  ctx.rotate(ball.angle);
+
+  const radius = (ball as any).circleRadius || 30;
+
+  // Ball shadow
+  ctx.beginPath();
+  ctx.arc(2, 4, radius, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.12)';
+  ctx.fill();
+
+  // Dark slate stone/iron ball with crisp border (Design theme `#44474F` with `#1B1B1F`)
+  ctx.beginPath();
+  ctx.arc(0, 0, radius, 0, Math.PI * 2);
+  ctx.fillStyle = '#44474F';
+  ctx.fill();
+
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = '#FFFFFF';
+  ctx.stroke();
+
+  // Inner shading arc
+  ctx.beginPath();
+  ctx.arc(0, 0, radius - 2, 0, Math.PI);
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.25)';
+  ctx.lineWidth = 4;
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+function drawCat(ctx: CanvasRenderingContext2D, catBody: Matter.Body, gameState: GameState) {
+  ctx.save();
+  ctx.translate(catBody.position.x, catBody.position.y);
+
+  const width = 48;
+  const height = 48;
+
+  // Cat Body (Warm Golden `#FFB300`)
+  ctx.fillStyle = '#FFB300';
+  ctx.beginPath();
+  ctx.roundRect(-width / 2, -height / 2, width, height, 16);
+  ctx.fill();
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = '#E65100';
+  ctx.stroke();
+
+  // Cat Ears
+  ctx.fillStyle = '#FF8F00';
+  // Left ear
+  ctx.beginPath();
+  ctx.moveTo(-width / 2 + 4, -height / 2);
+  ctx.lineTo(-width / 2 - 4, -height / 2 - 14);
+  ctx.lineTo(-width / 2 + 16, -height / 2);
+  ctx.fill();
+  ctx.stroke();
+
+  // Right ear
+  ctx.beginPath();
+  ctx.moveTo(width / 2 - 4, -height / 2);
+  ctx.lineTo(width / 2 + 4, -height / 2 - 14);
+  ctx.lineTo(width / 2 - 16, -height / 2);
+  ctx.fill();
+  ctx.stroke();
+
+  // Inner ear pink
+  ctx.fillStyle = '#FFE082';
+  ctx.beginPath();
+  ctx.moveTo(-width / 2 + 5, -height / 2 + 2);
+  ctx.lineTo(-width / 2 - 1, -height / 2 - 9);
+  ctx.lineTo(-width / 2 + 13, -height / 2 + 2);
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.moveTo(width / 2 - 5, -height / 2 + 2);
+  ctx.lineTo(width / 2 + 1, -height / 2 - 9);
+  ctx.lineTo(width / 2 - 13, -height / 2 + 2);
+  ctx.fill();
+
+  // Cat Face Expressions depending on GameState
+  ctx.fillStyle = '#1B1B1F';
+  if (gameState === 'FAILED') {
+    // Hurt/X eyes
+    drawXEye(ctx, -12, -4);
+    drawXEye(ctx, 12, -4);
+  } else if (gameState === 'WON') {
+    // Happy arch eyes
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.arc(-12, -4, 5, Math.PI, 0);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(12, -4, 5, Math.PI, 0);
+    ctx.stroke();
+  } else {
+    // Normal cute big eyes
+    ctx.beginPath();
+    ctx.arc(-12, -4, 5, 0, Math.PI * 2);
+    ctx.arc(12, -4, 5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Eye catchlights
+    ctx.fillStyle = '#FFFFFF';
+    ctx.beginPath();
+    ctx.arc(-10, -6, 2, 0, Math.PI * 2);
+    ctx.arc(14, -6, 2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Cute Nose & Whiskers
+  ctx.fillStyle = '#D81B60';
+  ctx.beginPath();
+  ctx.arc(0, 4, 3, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Whiskers
+  ctx.strokeStyle = '#5D4037';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(-16, 4); ctx.lineTo(-28, 0);
+  ctx.moveTo(-16, 8); ctx.lineTo(-28, 8);
+  ctx.moveTo(16, 4);  ctx.lineTo(28, 0);
+  ctx.moveTo(16, 8);  ctx.lineTo(28, 8);
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+function drawXEye(ctx: CanvasRenderingContext2D, x: number, y: number) {
+  ctx.strokeStyle = '#1B1B1F';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(x - 4, y - 4); ctx.lineTo(x + 4, y + 4);
+  ctx.moveTo(x + 4, y - 4); ctx.lineTo(x - 4, y + 4);
+  ctx.stroke();
+}
+
+function drawEditablePlank(ctx: CanvasRenderingContext2D, plank: PlacedPlank, isSelected: boolean) {
+  ctx.save();
+  ctx.translate(plank.x, plank.y);
+  ctx.rotate(plank.angle);
+
+  const w = plank.width;
+  const h = plank.height;
+  const woodType: WoodType = plank.woodType || 'OAK';
+  const mat = WOOD_MATERIALS[woodType] || WOOD_MATERIALS.OAK;
+
+  // Wood Plank Body
+  ctx.fillStyle = mat.color;
+  ctx.beginPath();
+  ctx.roundRect(-w / 2, -h / 2, w, h, 6);
+  ctx.fill();
+
+  // Wood Grain subtle highlight line
+  ctx.strokeStyle = mat.grainColor;
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(-w / 2 + 10, -h / 4); ctx.lineTo(w / 2 - 10, -h / 4);
+  ctx.stroke();
+
+  ctx.strokeStyle = mat.borderColor;
+  ctx.lineWidth = 2.5;
+  ctx.stroke();
+
+  // Wood Material Label Pill
+  ctx.fillStyle = mat.badgeBg;
+  ctx.beginPath();
+  ctx.roundRect(-24, -6, 48, 12, 6);
+  ctx.fill();
+  ctx.fillStyle = mat.badgeText;
+  ctx.font = 'bold 9px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(mat.name.toUpperCase(), 0, 0);
+
+  // Border selection outline
+  if (isSelected) {
+    ctx.strokeStyle = '#005AC1'; // Vibrant material blue selection ring
+    ctx.lineWidth = 3.5;
+    ctx.stroke();
+
+    // Rotate handle arm & handle knob
+    ctx.restore(); // Undo plank angle for handle drawing
+    ctx.save();
+
+    const handlePos = getRotateHandlePos(plank);
+    ctx.strokeStyle = '#005AC1';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(plank.x, plank.y);
+    ctx.lineTo(handlePos.x, handlePos.y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Knob
+    ctx.fillStyle = '#005AC1';
+    ctx.beginPath();
+    ctx.arc(handlePos.x, handlePos.y, 14, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = '#FFFFFF';
+    ctx.stroke();
+
+    // Rotate icon arrows inside knob
+    ctx.strokeStyle = '#FFFFFF';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(handlePos.x, handlePos.y, 7, 0, Math.PI * 1.5);
+    ctx.stroke();
+
+    ctx.restore();
+    return;
+  }
+
+  ctx.restore();
+}
+
+function drawPhysicsPlank(
+  ctx: CanvasRenderingContext2D,
+  plankBody: Matter.Body,
+  damageStates: Map<string, PlankDamageState>
+) {
+  const data = plankBody.customData;
+  if (!data || !data.plankId) return;
+
+  const damage = damageStates.get(data.plankId);
+  const isCracked = damage?.isCracked || false;
+  const woodType: WoodType = (data as any)?.woodType || 'OAK';
+  const mat = WOOD_MATERIALS[woodType] || WOOD_MATERIALS.OAK;
+
+  ctx.save();
+  ctx.translate(plankBody.position.x, plankBody.position.y);
+  ctx.rotate(plankBody.angle);
+
+  const w = data.width || 140;
+  const h = data.height || 18;
+
+  // Wood Plank Body
+  ctx.fillStyle = mat.color;
+  ctx.beginPath();
+  ctx.roundRect(-w / 2, -h / 2, w, h, 6);
+  ctx.fill();
+
+  // Grain
+  ctx.strokeStyle = mat.grainColor;
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(-w / 2 + 10, -h / 4); ctx.lineTo(w / 2 - 10, -h / 4);
+  ctx.stroke();
+
+  ctx.strokeStyle = mat.borderColor;
+  ctx.lineWidth = 2.5;
+  ctx.stroke();
+
+  // If cracked, draw jagged crack lines overlay
+  if (isCracked) {
+    ctx.strokeStyle = '#1B1B1F';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(-10, -h / 2);
+    ctx.lineTo(-2, -2);
+    ctx.lineTo(4, 2);
+    ctx.lineTo(0, h / 2);
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
+function drawFragment(ctx: CanvasRenderingContext2D, fragBody: Matter.Body) {
+  ctx.save();
+  ctx.translate(fragBody.position.x, fragBody.position.y);
+  ctx.rotate(fragBody.angle);
+
+  // Read bounds or dimensions
+  const minX = fragBody.bounds.min.x;
+  const maxX = fragBody.bounds.max.x;
+  const w = Math.max(30, maxX - minX);
+  const h = 18;
+
+  const data = fragBody.customData;
+  const woodType: WoodType = (data as any)?.woodType || 'OAK';
+  const mat = WOOD_MATERIALS[woodType] || WOOD_MATERIALS.OAK;
+
+  ctx.fillStyle = mat.color;
+  ctx.beginPath();
+  ctx.roundRect(-w / 2, -h / 2, w, h, 4);
+  ctx.fill();
+
+  // Jagged fracture edge
+  ctx.strokeStyle = mat.borderColor;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+// Helpers
+function getRotateHandlePos(plank: PlacedPlank) {
+  const handleRadius = plank.width / 2 + 35;
+  return {
+    x: plank.x + handleRadius * Math.cos(plank.angle),
+    y: plank.y + handleRadius * Math.sin(plank.angle),
+  };
+}
+
+function isPointInsidePlank(px: number, py: number, plank: PlacedPlank): boolean {
+  const dx = px - plank.x;
+  const dy = py - plank.y;
+  const cos = Math.cos(-plank.angle);
+  const sin = Math.sin(-plank.angle);
+
+  const localX = dx * cos - dy * sin;
+  const localY = dx * sin + dy * cos;
+
+  const halfW = plank.width / 2 + 10;
+  const halfH = plank.height / 2 + 10;
+
+  return Math.abs(localX) <= halfW && Math.abs(localY) <= halfH;
+}

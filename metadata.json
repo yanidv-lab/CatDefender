@@ -1,0 +1,6 @@
+{
+  "name": "Cat Defender",
+  "description": "A 2D breakable physics puzzle game where you build protective wooden shelters to protect the cat from falling heavy boulders.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
