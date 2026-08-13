@@ -23,9 +23,9 @@ import { plankPrice } from '../entities/economy';
 
 const WOOD_ORDER: WoodType[] = ['PINE', 'OAK', 'IRONWOOD'];
 const WOOD_SPRITES: Record<WoodType, string> = {
-  PINE: '/assets/plank_pine.png',
-  OAK: '/assets/plank_oak.png',
-  IRONWOOD: '/assets/plank_ironwood.png',
+  PINE: './assets/plank_pine.png',
+  OAK: './assets/plank_oak.png',
+  IRONWOOD: './assets/plank_ironwood.png',
 };
 
 interface GameHUDProps {

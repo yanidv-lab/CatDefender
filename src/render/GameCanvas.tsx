@@ -37,21 +37,21 @@ function isReady(img: HTMLImageElement) {
 }
 
 const BOULDER_SPRITES = {
-  stone: loadSprite('/assets/boulder_stone.png'),
-  iron: loadSprite('/assets/boulder_iron.png'),
+  stone: loadSprite('./assets/boulder_stone.png'),
+  iron: loadSprite('./assets/boulder_iron.png'),
 };
-const GROUND_SPRITE = loadSprite('/assets/ground_terrain.png');
-const CAT_SPRITE = loadSprite('/assets/cat_idle.png');
+const GROUND_SPRITE = loadSprite('./assets/ground_terrain.png');
+const CAT_SPRITE = loadSprite('./assets/cat_idle.png');
 const CLOUD_SPRITES = [
-  loadSprite('/assets/cloud_cream_1.png'),
-  loadSprite('/assets/cloud_blue_1.png'),
-  loadSprite('/assets/cloud_cream_2.png'),
-  loadSprite('/assets/cloud_blue_2.png'),
+  loadSprite('./assets/cloud_cream_1.png'),
+  loadSprite('./assets/cloud_blue_1.png'),
+  loadSprite('./assets/cloud_cream_2.png'),
+  loadSprite('./assets/cloud_blue_2.png'),
 ];
 const PLANK_SPRITES: Record<WoodType, HTMLImageElement> = {
-  PINE: loadSprite('/assets/plank_pine.png'),
-  OAK: loadSprite('/assets/plank_oak.png'),
-  IRONWOOD: loadSprite('/assets/plank_ironwood.png'),
+  PINE: loadSprite('./assets/plank_pine.png'),
+  OAK: loadSprite('./assets/plank_oak.png'),
+  IRONWOOD: loadSprite('./assets/plank_ironwood.png'),
 };
 
 // Fills the current rounded-rect plank path (already begun by the caller) with the
