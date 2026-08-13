@@ -59,6 +59,8 @@ export interface Vector2D {
   y: number;
 }
 
+export type BallMaterial = 'stone' | 'iron';
+
 export interface BallConfig {
   id: string;
   x: number;
@@ -68,6 +70,7 @@ export interface BallConfig {
   restitution: number;  // Bounciness (0.1 - 0.9)
   friction: number;     // Surface friction (0.05 - 0.5)
   color?: string;
+  material?: BallMaterial; // Which rendered sprite to use; defaults to 'stone'
   dropDelayMs?: number; // Delay before dropping if multi-ball
 }
 

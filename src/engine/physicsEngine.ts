@@ -145,7 +145,11 @@ export class PhysicsEngine {
           label: 'ball',
         }
       );
-      (ballBody as any).customData = { ballId: ballCfg.id, dropDelayMs: ballCfg.dropDelayMs || 0 };
+      (ballBody as any).customData = {
+        ballId: ballCfg.id,
+        dropDelayMs: ballCfg.dropDelayMs || 0,
+        material: ballCfg.material || 'stone',
+      };
       this.ballBodies.set(ballCfg.id, ballBody);
       Matter.World.add(this.world, ballBody);
     });

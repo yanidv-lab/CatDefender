@@ -26,6 +26,7 @@ export const GAME_LEVELS: LevelData[] = [
         restitution: 0.2,
         friction: 0.3,
         color: '#78716C', // Stone gray
+        material: 'stone',
       },
     ],
     availablePlanksCount: 3,
@@ -61,6 +62,7 @@ export const GAME_LEVELS: LevelData[] = [
         restitution: 0.15,
         friction: 0.4,
         color: '#475569', // Dark iron
+        material: 'iron',
       },
     ],
     availablePlanksCount: 4,
@@ -95,6 +97,7 @@ export const GAME_LEVELS: LevelData[] = [
         restitution: 0.25,
         friction: 0.3,
         color: '#78716C',
+        material: 'stone',
         dropDelayMs: 0,
       },
       {
@@ -106,6 +109,7 @@ export const GAME_LEVELS: LevelData[] = [
         restitution: 0.2,
         friction: 0.3,
         color: '#57534E',
+        material: 'stone',
         dropDelayMs: 600,
       },
     ],
@@ -141,6 +145,7 @@ export const GAME_LEVELS: LevelData[] = [
         restitution: 0.3,
         friction: 0.3,
         color: '#78716C',
+        material: 'stone',
         dropDelayMs: 0,
       },
       {
@@ -152,6 +157,7 @@ export const GAME_LEVELS: LevelData[] = [
         restitution: 0.2,
         friction: 0.3,
         color: '#475569',
+        material: 'iron',
         dropDelayMs: 400,
       },
       {
@@ -163,6 +169,7 @@ export const GAME_LEVELS: LevelData[] = [
         restitution: 0.25,
         friction: 0.3,
         color: '#78716C',
+        material: 'stone',
         dropDelayMs: 900,
       },
     ],

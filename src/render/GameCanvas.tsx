@@ -17,6 +17,29 @@ interface GameCanvasProps {
   onPanChange: (offset: { x: number; y: number }) => void;
 }
 
+// --- Sprite loading (claymation asset pass) ---
+// Images live in /public/assets and are loaded once at module scope. Draw calls
+// fall back to the original procedural shapes until (or unless) a sprite finishes
+// loading, so a missing/slow asset never breaks rendering.
+const spriteCache: Record<string, HTMLImageElement> = {};
+function loadSprite(src: string): HTMLImageElement {
+  if (!spriteCache[src]) {
+    const img = new Image();
+    img.src = src;
+    spriteCache[src] = img;
+  }
+  return spriteCache[src];
+}
+function isReady(img: HTMLImageElement) {
+  return img.complete && img.naturalWidth > 0;
+}
+
+const BOULDER_SPRITES = {
+  stone: loadSprite('/assets/boulder_stone.png'),
+  iron: loadSprite('/assets/boulder_iron.png'),
+};
+const GROUND_SPRITE = loadSprite('/assets/ground_terrain.png');
+
 interface DebrisParticle {
   x: number;
   y: number;
@@ -406,6 +429,16 @@ function drawGround(ctx: CanvasRenderingContext2D, level: LevelData) {
   const groundY = level.groundY;
   const groundHeight = 120;
 
+  if (isReady(GROUND_SPRITE)) {
+    // Claymation grass-over-dirt texture; slight overlap above groundY so the
+    // grass edge reads naturally under planks/the cat resting on the line.
+    const topOverlap = 14;
+    ctx.drawImage(GROUND_SPRITE, 0, groundY - topOverlap, level.worldWidth, groundHeight + topOverlap);
+    ctx.restore();
+    return;
+  }
+
+  // Fallback procedural ground while the texture loads (or if it fails to load)
   // Primary ground accent line
   ctx.fillStyle = '#005AC1';
   ctx.fillRect(0, groundY - 2, level.worldWidth, 4);
@@ -437,7 +470,22 @@ function drawBall(ctx: CanvasRenderingContext2D, ball: Matter.Body) {
   ctx.rotate(ball.angle);
 
   const radius = (ball as any).circleRadius || 30;
+  const material: 'stone' | 'iron' = (ball as any).customData?.material === 'iron' ? 'iron' : 'stone';
+  const sprite = BOULDER_SPRITES[material];
 
+  if (isReady(sprite)) {
+    // Claymation boulder sprite (rotation-safe: a sphere reads correctly from any angle)
+    ctx.beginPath();
+    ctx.arc(2, radius * 0.12, radius, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.14)';
+    ctx.fill();
+
+    ctx.drawImage(sprite, -radius, -radius, radius * 2, radius * 2);
+    ctx.restore();
+    return;
+  }
+
+  // Fallback while the sprite loads (or if it fails to load)
   // Ball shadow
   ctx.beginPath();
   ctx.arc(2, 4, radius, 0, Math.PI * 2);
