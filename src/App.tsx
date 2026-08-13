@@ -62,8 +62,9 @@ export const App: React.FC = () => {
   const [placedPlanks, setPlacedPlanks] = useState<PlacedPlank[]>([]);
   const [selectedPlankId, setSelectedPlankId] = useState<string | null>(null);
 
-  // The plank currently held in hand (positioned but not yet committed).
-  const [heldPlankId, setHeldPlankId] = useState<string | null>(null);
+  // Planks stay exactly where the player puts them — mid-air included — and
+  // only meet gravity when the level starts, so there is no "committed" state
+  // to track. Selection alone drives the editing toolbar.
 
   // Points banked at the moment the level was won, so the win screen can show
   // the score for that run rather than the running total.
@@ -123,7 +124,6 @@ export const App: React.FC = () => {
       // Levels start empty — the player places every plank themselves from the
       // inventory rail, so the shelter is entirely their design.
       setPlacedPlanks([]);
-      setHeldPlankId(null);
       physicsEngineRef.current?.initLevel(lvl, []);
       fitCameraToLevel(lvl);
     },
@@ -164,7 +164,6 @@ export const App: React.FC = () => {
    * usable supply is therefore simply what the points balance can afford.
    */
   const handleSpawnPlank = (woodType: WoodType) => {
-    if (heldPlankId) return; // finish placing the current plank first
     const price = plankPrice(woodType);
     if (points < price) return;
 
@@ -179,24 +178,19 @@ export const App: React.FC = () => {
       height: currentLevel.defaultPlankHeight,
       angle: 0,
       woodType,
-      committed: false,
     };
 
     syncPlanks([...placedPlanks, newPlank]);
-    setHeldPlankId(newPlankId);
     setSelectedPlankId(newPlankId);
     soundManager.play('ui_click');
     triggerHaptic('ui_click');
   };
 
-  /** Confirms the held plank: it becomes dynamic and falls unless supported. */
+  /** Finishes editing the selected plank so the next one can be placed. */
   const handleCommitPlank = () => {
-    if (!heldPlankId) return;
-    syncPlanks(placedPlanks.map((p) => (p.id === heldPlankId ? { ...p, committed: true } : p)));
-    setHeldPlankId(null);
     setSelectedPlankId(null);
-    soundManager.play('wood_impact');
-    triggerHaptic('wood_impact');
+    soundManager.play('ui_click');
+    triggerHaptic('ui_click');
   };
 
   /** Removing a plank refunds its price. */
@@ -204,7 +198,6 @@ export const App: React.FC = () => {
     const plank = placedPlanks.find((p) => p.id === id);
     if (plank) setPoints((pt) => pt + plankPrice(plank.woodType || 'OAK'));
     if (selectedPlankId === id) setSelectedPlankId(null);
-    if (heldPlankId === id) setHeldPlankId(null);
     syncPlanks(placedPlanks.filter((p) => p.id !== id));
   };
 
@@ -282,7 +275,6 @@ export const App: React.FC = () => {
         bestLevel={bestLevel}
         gameState={gameState}
         points={points}
-        heldPlankId={heldPlankId}
         placedPlanks={placedPlanks}
         selectedPlankId={selectedPlankId}
         simulationStats={simulationStats}

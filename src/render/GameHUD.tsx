@@ -34,7 +34,6 @@ interface GameHUDProps {
   bestLevel: number;
   gameState: GameState;
   points: number;
-  heldPlankId: string | null;
   placedPlanks: PlacedPlank[];
   selectedPlankId: string | null;
   simulationStats: SimulationStats;
@@ -56,7 +55,6 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   totalLevels,
   gameState,
   points,
-  heldPlankId,
   placedPlanks,
   selectedPlankId,
   simulationStats,
@@ -165,7 +163,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
             const mat = WOOD_MATERIALS[woodType];
             const price = plankPrice(woodType);
             const affordable = Math.floor(points / price);
-            const disabled = affordable < 1 || !!heldPlankId;
+            const disabled = affordable < 1;
 
             return (
               <button
@@ -200,7 +198,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
       {/* --- BOULDER BRIEFING BUBBLE ---
            Shown while building so the player can plan against real numbers;
            it disappears the moment the level starts. */}
-      {isEditing && !heldPlankId && (
+      {isEditing && !selectedPlank && (
         <div className="absolute bottom-[92px] left-1/2 -translate-x-1/2 pointer-events-none bg-black/45 backdrop-blur-md rounded-2xl px-3.5 py-2 shadow-lg flex items-center gap-3.5">
           <div className="flex items-center gap-1.5">
             <Ruler className="w-3.5 h-3.5 text-[#FFD54F]" />
@@ -227,7 +225,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
       )}
 
       {/* --- SELECTED PLANK TOOLBAR --- */}
-      {isEditing && selectedPlank && selectedPlank.id === heldPlankId && (
+      {isEditing && selectedPlank && (
         <div className="absolute bottom-[92px] left-1/2 -translate-x-1/2 pointer-events-auto bg-black/55 backdrop-blur-md rounded-full p-1.5 flex items-center gap-1 shadow-xl">
           <button
             onClick={() => {
@@ -287,9 +285,9 @@ export const GameHUD: React.FC<GameHUDProps> = ({
           <button
             onClick={onCommitPlank}
             className="h-11 px-4 rounded-full bg-[#2E7D32] hover:bg-[#256628] flex items-center justify-center gap-1.5 font-extrabold text-sm active:scale-95 transition"
-            aria-label="Place plank"
+            aria-label="Done placing"
           >
-            <Check className="w-5 h-5" /> PLACE
+            <Check className="w-5 h-5" /> DONE
           </button>
         </div>
       )}

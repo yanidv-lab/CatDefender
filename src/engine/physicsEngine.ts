@@ -12,12 +12,6 @@ export interface PlacedPlank {
   width: number;
   height: number;
   woodType?: WoodType;
-  /**
-   * False while the player is still positioning this plank (held in place,
-   * ignoring gravity). Once committed it becomes a dynamic body and will fall
-   * and settle unless the rest of the structure supports it.
-   */
-  committed?: boolean;
 }
 
 export interface PhysicsEngineCallbacks {
@@ -179,9 +173,9 @@ export class PhysicsEngine {
         p.width,
         p.height,
         {
-          // A committed plank is live immediately, so the structure settles as
-          // it is built; only the plank currently being positioned is held.
-          isStatic: !p.committed,
+          // Held in place for the whole build phase, mid-air included. Gravity
+          // is only applied when the player starts the level.
+          isStatic: true,
           angle: p.angle,
           density: mat.density,
           friction: 0.6,
@@ -217,16 +211,12 @@ export class PhysicsEngine {
     this.callbacks.onGameStateChange('EDITING');
     this.callbacks.onPlankDamageUpdate(new Map(this.plankDamageStates));
 
-    // Start stepping straight away so placed planks settle during the build.
     this.stopSimulation();
-    this.activeAnimationFrame = requestAnimationFrame(this.runLoop);
   }
 
   /**
-   * Reconciles the world with the player's plank list without rebuilding it.
-   * A full rebuild would snap already-settled planks back to their authored
-   * coordinates, so committed bodies are left alone and only additions,
-   * removals and the in-hand plank's transform are applied.
+   * Reconciles the world with the player's plank list without rebuilding it,
+   * so repositioning one plank never disturbs the rest of the build.
    */
   public updatePlacedPlanks(userPlanks: PlacedPlank[]) {
     if (this.gameState !== 'EDITING' || !this.currentLevel) return;
@@ -248,19 +238,10 @@ export class PhysicsEngine {
         this.addPlankBody(p);
         return;
       }
-      const data = (existing as any).customData;
-      if (p.committed && data && !data.committed) {
-        // Player confirmed placement: hand it over to gravity.
-        data.committed = true;
-        Matter.Body.setStatic(existing, false);
-        Matter.Body.setVelocity(existing, { x: 0, y: 0 });
-        Matter.Body.setAngularVelocity(existing, 0);
-        Matter.Sleeping.set(existing, false);
-      } else if (!p.committed) {
-        // Still being positioned — follow the player's drag exactly.
-        Matter.Body.setPosition(existing, { x: p.x, y: p.y });
-        Matter.Body.setAngle(existing, p.angle);
-      }
+      // Nothing is simulated yet, so every plank just follows the position the
+      // player put it in.
+      Matter.Body.setPosition(existing, { x: p.x, y: p.y });
+      Matter.Body.setAngle(existing, p.angle);
     });
 
     this.callbacks.onPlankDamageUpdate(new Map(this.plankDamageStates));
@@ -271,7 +252,7 @@ export class PhysicsEngine {
     const mat = WOOD_MATERIALS[wType] || WOOD_MATERIALS.OAK;
 
     const plankBody = Matter.Bodies.rectangle(p.x, p.y, p.width, p.height, {
-      isStatic: !p.committed,
+      isStatic: true,
       angle: p.angle,
       density: mat.density,
       friction: 0.6,
@@ -286,7 +267,6 @@ export class PhysicsEngine {
       health: mat.maxHealth,
       isCracked: false,
       isBroken: false,
-      committed: !!p.committed,
       width: p.width,
       height: p.height,
     };
@@ -310,15 +290,11 @@ export class PhysicsEngine {
     this.callbacks.onSoundTrigger?.('ball_drop');
     this.simulationStartTime = Date.now();
 
-    // 1. Anything still held in hand is committed now, so the whole structure
-    //    is live before the boulder is released.
+    // 1. Gravity arrives now: the whole structure goes live at once, so an
+    //    unsupported build collapses exactly as the player placed it.
     this.plankBodies.forEach((plankBody) => {
-      const data = (plankBody as any).customData;
-      if (data) data.committed = true;
-      if (plankBody.isStatic) {
-        Matter.Body.setStatic(plankBody, false);
-        Matter.Body.setSpeed(plankBody, 0);
-      }
+      Matter.Body.setStatic(plankBody, false);
+      Matter.Body.setSpeed(plankBody, 0);
     });
 
     // 2. Schedule Ball release (accounting for optional dropDelayMs)
@@ -336,14 +312,11 @@ export class PhysicsEngine {
     });
 
     // 3. Start custom simulation loop
-    // The loop is already running from the editing phase; it simply keeps going
-    // now that gameState is SIMULATING and the balls have been released.
+    this.activeAnimationFrame = requestAnimationFrame(this.runLoop);
   }
 
   private runLoop = () => {
-    // The loop runs during EDITING too, so committed planks fall and settle
-    // while the shelter is being built. Only win/lose evaluation is gated.
-    if (this.gameState !== 'SIMULATING' && this.gameState !== 'EDITING') return;
+    if (this.gameState !== 'SIMULATING') return;
 
     // Step physics engine at 60fps
     Matter.Engine.update(this.engine, 1000 / 60);

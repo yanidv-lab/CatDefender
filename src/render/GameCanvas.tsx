@@ -282,22 +282,17 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         drawCat(ctx, bodies.catBody, gameState, currentLevel.cat.width, currentLevel.cat.height);
       }
 
-      // Committed planks are simulated even while building, so they always draw
-      // from their physics body. Only the plank still held in hand is drawn from
-      // the player's authored coordinates, with its editing handles.
-      {
-        const heldPlank =
-          gameState === 'EDITING' ? placedPlanks.find((p) => !p.committed) : undefined;
-
+      // While building, planks hold exactly where the player put them, so they
+      // draw from the authored coordinates with their editing handles. Once the
+      // level starts they are simulated and draw from their physics bodies.
+      if (gameState === 'EDITING') {
+        placedPlanks.forEach((plank) => {
+          drawEditablePlank(ctx, plank, plank.id === selectedPlankId);
+        });
+      } else {
         bodies.plankBodies.forEach((plankBody) => {
-          const plankId = (plankBody as any).customData?.plankId;
-          if (heldPlank && plankId === heldPlank.id) return;
           drawPhysicsPlank(ctx, plankBody, bodies.plankDamageStates);
         });
-
-        if (heldPlank) {
-          drawEditablePlank(ctx, heldPlank, heldPlank.id === selectedPlankId);
-        }
       }
 
       // Draw Snapped Fragments
@@ -401,12 +396,14 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       }
     }
 
-    // 2. Only the plank still held in hand can be picked up and moved —
-    //    committed planks belong to the physics structure now.
+    // 2. Any plank can be picked up and repositioned right up until the level
+    //    starts. Topmost first, so overlapping planks select predictably.
     let hitPlank: PlacedPlank | null = null;
-    const held = placedPlanks.find((p) => !p.committed);
-    if (held && isPointInsidePlank(worldPos.x, worldPos.y, held)) {
-      hitPlank = held;
+    for (let i = placedPlanks.length - 1; i >= 0; i--) {
+      if (isPointInsidePlank(worldPos.x, worldPos.y, placedPlanks[i])) {
+        hitPlank = placedPlanks[i];
+        break;
+      }
     }
 
     if (hitPlank) {
