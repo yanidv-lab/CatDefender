@@ -1,5 +1,6 @@
 import Matter from 'matter-js';
-import { LevelData, PlankConfig, PlankDamageState, SimulationStats, WoodType, WOOD_MATERIALS } from '../entities/types';
+import { LevelData, PlankDamageState, SimulationStats, WoodType, WOOD_MATERIALS } from '../entities/types';
+import { pixelsToMeters } from '../entities/economy';
 
 export type GameState = 'EDITING' | 'SIMULATING' | 'WON' | 'FAILED';
 
@@ -11,6 +12,12 @@ export interface PlacedPlank {
   width: number;
   height: number;
   woodType?: WoodType;
+  /**
+   * False while the player is still positioning this plank (held in place,
+   * ignoring gravity). Once committed it becomes a dynamic body and will fall
+   * and settle unless the rest of the structure supports it.
+   */
+  committed?: boolean;
 }
 
 export interface PhysicsEngineCallbacks {
@@ -44,6 +51,7 @@ export class PhysicsEngine {
   private placedPlanks: PlacedPlank[] = [];
   private plankDamageStates: Map<string, PlankDamageState> = new Map();
   private maxImpactForce: number = 0;
+  private maxCatImpactForce: number = 0;
   private catHurt: boolean = false;
   private simulationStartTime: number = 0;
   private activeAnimationFrame: number | null = null;
@@ -73,6 +81,7 @@ export class PhysicsEngine {
     this.gameState = 'EDITING';
     this.catHurt = false;
     this.maxImpactForce = 0;
+    this.maxCatImpactForce = 0;
     this.placedPlanks = [...userPlanks];
     this.plankDamageStates.clear();
     this.fragmentBodies = [];
@@ -113,12 +122,16 @@ export class PhysicsEngine {
 
     Matter.World.add(this.world, [this.groundBody, this.leftWallBody, this.rightWallBody]);
 
-    // 2. Create Cat Hitbox
+    // 2. Create Cat Hitbox.
+    // Deliberately smaller than the drawn cat: a shelter's legs naturally come
+    // to rest right beside the cat, and a full-size box would count that
+    // harmless brush as a killing blow. Only the cat's core counts as a hit.
+    const HITBOX_SCALE = 0.55;
     this.catBody = Matter.Bodies.rectangle(
       level.cat.x,
       level.cat.y,
-      level.cat.width,
-      level.cat.height,
+      level.cat.width * HITBOX_SCALE,
+      level.cat.height * HITBOX_SCALE,
       {
         isStatic: true, // Cat sits firmly on ground
         friction: 0.9,
@@ -166,7 +179,9 @@ export class PhysicsEngine {
         p.width,
         p.height,
         {
-          isStatic: true, // Static during editing
+          // A committed plank is live immediately, so the structure settles as
+          // it is built; only the plank currently being positioned is held.
+          isStatic: !p.committed,
           angle: p.angle,
           density: mat.density,
           friction: 0.6,
@@ -201,11 +216,90 @@ export class PhysicsEngine {
 
     this.callbacks.onGameStateChange('EDITING');
     this.callbacks.onPlankDamageUpdate(new Map(this.plankDamageStates));
+
+    // Start stepping straight away so placed planks settle during the build.
+    this.stopSimulation();
+    this.activeAnimationFrame = requestAnimationFrame(this.runLoop);
   }
 
+  /**
+   * Reconciles the world with the player's plank list without rebuilding it.
+   * A full rebuild would snap already-settled planks back to their authored
+   * coordinates, so committed bodies are left alone and only additions,
+   * removals and the in-hand plank's transform are applied.
+   */
   public updatePlacedPlanks(userPlanks: PlacedPlank[]) {
     if (this.gameState !== 'EDITING' || !this.currentLevel) return;
-    this.initLevel(this.currentLevel, userPlanks);
+
+    const incomingIds = new Set(userPlanks.map((p) => p.id));
+
+    // Remove bodies whose planks are gone
+    this.plankBodies.forEach((body, id) => {
+      if (!incomingIds.has(id)) {
+        Matter.World.remove(this.world, body);
+        this.plankBodies.delete(id);
+        this.plankDamageStates.delete(id);
+      }
+    });
+
+    userPlanks.forEach((p) => {
+      const existing = this.plankBodies.get(p.id);
+      if (!existing) {
+        this.addPlankBody(p);
+        return;
+      }
+      const data = (existing as any).customData;
+      if (p.committed && data && !data.committed) {
+        // Player confirmed placement: hand it over to gravity.
+        data.committed = true;
+        Matter.Body.setStatic(existing, false);
+        Matter.Body.setVelocity(existing, { x: 0, y: 0 });
+        Matter.Body.setAngularVelocity(existing, 0);
+        Matter.Sleeping.set(existing, false);
+      } else if (!p.committed) {
+        // Still being positioned — follow the player's drag exactly.
+        Matter.Body.setPosition(existing, { x: p.x, y: p.y });
+        Matter.Body.setAngle(existing, p.angle);
+      }
+    });
+
+    this.callbacks.onPlankDamageUpdate(new Map(this.plankDamageStates));
+  }
+
+  private addPlankBody(p: PlacedPlank) {
+    const wType = p.woodType || 'OAK';
+    const mat = WOOD_MATERIALS[wType] || WOOD_MATERIALS.OAK;
+
+    const plankBody = Matter.Bodies.rectangle(p.x, p.y, p.width, p.height, {
+      isStatic: !p.committed,
+      angle: p.angle,
+      density: mat.density,
+      friction: 0.6,
+      restitution: 0.15,
+      label: 'plank',
+    });
+
+    (plankBody as any).customData = {
+      plankId: p.id,
+      woodType: wType,
+      maxHealth: mat.maxHealth,
+      health: mat.maxHealth,
+      isCracked: false,
+      isBroken: false,
+      committed: !!p.committed,
+      width: p.width,
+      height: p.height,
+    };
+
+    this.plankBodies.set(p.id, plankBody);
+    this.plankDamageStates.set(p.id, {
+      id: p.id,
+      health: mat.maxHealth,
+      maxHealth: mat.maxHealth,
+      isCracked: false,
+      isBroken: false,
+    });
+    Matter.World.add(this.world, plankBody);
   }
 
   public startDropSimulation() {
@@ -216,11 +310,15 @@ export class PhysicsEngine {
     this.callbacks.onSoundTrigger?.('ball_drop');
     this.simulationStartTime = Date.now();
 
-    // 1. Convert placed planks to dynamic rigid bodies
+    // 1. Anything still held in hand is committed now, so the whole structure
+    //    is live before the boulder is released.
     this.plankBodies.forEach((plankBody) => {
-      Matter.Body.setStatic(plankBody, false);
-      // Give tiny sleep wake up
-      Matter.Body.setSpeed(plankBody, 0);
+      const data = (plankBody as any).customData;
+      if (data) data.committed = true;
+      if (plankBody.isStatic) {
+        Matter.Body.setStatic(plankBody, false);
+        Matter.Body.setSpeed(plankBody, 0);
+      }
     });
 
     // 2. Schedule Ball release (accounting for optional dropDelayMs)
@@ -238,11 +336,14 @@ export class PhysicsEngine {
     });
 
     // 3. Start custom simulation loop
-    this.runLoop();
+    // The loop is already running from the editing phase; it simply keeps going
+    // now that gameState is SIMULATING and the balls have been released.
   }
 
   private runLoop = () => {
-    if (this.gameState !== 'SIMULATING') return;
+    // The loop runs during EDITING too, so committed planks fall and settle
+    // while the shelter is being built. Only win/lose evaluation is gated.
+    if (this.gameState !== 'SIMULATING' && this.gameState !== 'EDITING') return;
 
     // Step physics engine at 60fps
     Matter.Engine.update(this.engine, 1000 / 60);
@@ -264,13 +365,32 @@ export class PhysicsEngine {
 
     this.callbacks.onStatsUpdate({
       maxImpactForce: this.maxImpactForce,
+      catImpactForce: this.maxCatImpactForce,
       planksCrackedCount: crackedCount,
       planksBrokenCount: brokenCount,
       timeElapsedSeconds: Math.round(elapsedSeconds * 10) / 10,
+      ballAltitudeMeters: this.getLeadingBallAltitudeMeters(),
     });
 
     this.activeAnimationFrame = requestAnimationFrame(this.runLoop);
   };
+
+  /**
+   * Altitude of the boulder closest to the ground — the one about to land, and
+   * so the one the barometer should be tracking. Reported in metres so the UI
+   * never has to know about pixel scale.
+   */
+  private getLeadingBallAltitudeMeters(): number {
+    if (!this.currentLevel || this.ballBodies.size === 0) return 0;
+    const groundY = this.currentLevel.groundY;
+    let lowestAltitude = Infinity;
+    this.ballBodies.forEach((ball) => {
+      const altitudePx = groundY - ball.position.y - (ball as any).circleRadius;
+      lowestAltitude = Math.min(lowestAltitude, altitudePx);
+    });
+    if (!isFinite(lowestAltitude)) return 0;
+    return Math.max(0, pixelsToMeters(lowestAltitude));
+  }
 
   private setupCollisionEvents() {
     Matter.Events.on(this.engine, 'collisionStart', (event) => {
@@ -310,6 +430,9 @@ export class PhysicsEngine {
           // Ignore ground touching cat
           if (otherBody.label !== 'ground' && otherBody.label !== 'wall') {
             const catThreshold = this.currentLevel?.cat.maxDamageForce || 8.0;
+            if (impactForce > this.maxCatImpactForce) {
+              this.maxCatImpactForce = Math.round(impactForce * 10) / 10;
+            }
             if (impactForce > 0.8) {
               this.callbacks.onCatImpact(impactForce);
             }

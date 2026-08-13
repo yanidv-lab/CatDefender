@@ -8,6 +8,8 @@ export interface WoodMaterialConfig {
   description: string;
   density: number;
   maxHealth: number;
+  /** Point cost to buy one plank of this material. Scales with strength. */
+  price: number;
   color: string;
   borderColor: string;
   grainColor: string;
@@ -19,9 +21,10 @@ export const WOOD_MATERIALS: Record<WoodType, WoodMaterialConfig> = {
   PINE: {
     type: 'PINE',
     name: 'Pine',
-    description: 'Lightweight & Brittle (65 HP)',
+    description: 'Lightweight and brittle',
     density: 0.0015,
     maxHealth: 65,
+    price: 60,
     color: '#D7CCC8',
     borderColor: '#8D6E63',
     grainColor: 'rgba(93, 64, 55, 0.25)',
@@ -31,9 +34,10 @@ export const WOOD_MATERIALS: Record<WoodType, WoodMaterialConfig> = {
   OAK: {
     type: 'OAK',
     name: 'Oak',
-    description: 'Balanced & Sturdy (110 HP)',
+    description: 'Balanced and sturdy',
     density: 0.0035,
     maxHealth: 110,
+    price: 100,
     color: '#795548',
     borderColor: '#3E2723',
     grainColor: 'rgba(255, 255, 255, 0.18)',
@@ -43,9 +47,10 @@ export const WOOD_MATERIALS: Record<WoodType, WoodMaterialConfig> = {
   IRONWOOD: {
     type: 'IRONWOOD',
     name: 'Ironwood',
-    description: 'Heavy & Ultra-Tough (200 HP)',
+    description: 'Heavy and ultra-tough',
     density: 0.008,
     maxHealth: 200,
+    price: 250,
     color: '#3E2723',
     borderColor: '#1B1B1F',
     grainColor: 'rgba(255, 215, 0, 0.3)',
@@ -100,13 +105,21 @@ export interface CatConfig {
   color?: string;
 }
 
+/** How many planks of each wood type the level hands the player for free. */
+export type PlankInventory = Record<WoodType, number>;
+
 export interface LevelData {
   id: number;
   title: string;
   description: string;
   cat: CatConfig;
   balls: BallConfig[];
-  availablePlanksCount: number;
+  /** Free planks granted at the start of this level, by wood type. */
+  startingInventory: PlankInventory;
+  /** Drop height of the boulder above the ground, in metres. Drives world size. */
+  dropHeightMeters: number;
+  /** Points awarded for clearing this level. */
+  reward: number;
   defaultPlankWidth: number;
   defaultPlankHeight: number;
   groundY: number;
@@ -125,8 +138,13 @@ export interface PlankDamageState {
 }
 
 export interface SimulationStats {
+  /** Strongest collision anywhere in the scene — used for scoring/telemetry. */
   maxImpactForce: number;
+  /** Strongest force that actually reached the cat. This is what decides a loss. */
+  catImpactForce: number;
   planksCrackedCount: number;
   planksBrokenCount: number;
   timeElapsedSeconds: number;
+  /** Altitude of the lowest still-falling boulder, in metres above the ground. */
+  ballAltitudeMeters: number;
 }

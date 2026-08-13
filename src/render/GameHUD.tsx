@@ -2,82 +2,80 @@ import React, { useState } from 'react';
 import {
   Play,
   RotateCcw,
-  Plus,
   Trash2,
   RotateCw,
   RotateCcw as RotateLeftIcon,
-  ZoomIn,
-  ZoomOut,
-  Maximize2,
   Volume2,
   VolumeX,
   HelpCircle,
   Trophy,
   AlertTriangle,
-  ShieldCheck,
   ChevronRight,
-  Info,
-  Shield,
-  Layers,
-  Compass,
-  Star,
+  Coins,
+  Check,
+  Ruler,
+  Weight,
 } from 'lucide-react';
 import { GameState, PlacedPlank } from '../engine/physicsEngine';
 import { LevelData, SimulationStats, WoodType, WOOD_MATERIALS } from '../entities/types';
 import { soundManager } from '../engine/soundEffects';
-import { calculateStars } from '../engine/scoring';
+import { plankPrice } from '../entities/economy';
+
+const WOOD_ORDER: WoodType[] = ['PINE', 'OAK', 'IRONWOOD'];
+const WOOD_SPRITES: Record<WoodType, string> = {
+  PINE: '/assets/plank_pine.png',
+  OAK: '/assets/plank_oak.png',
+  IRONWOOD: '/assets/plank_ironwood.png',
+};
 
 interface GameHUDProps {
   currentLevel: LevelData;
-  levelsList: LevelData[];
-  maxUnlockedLevel: number;
-  levelStars: Record<number, number>;
+  totalLevels: number;
+  bestLevel: number;
   gameState: GameState;
+  points: number;
+  heldPlankId: string | null;
   placedPlanks: PlacedPlank[];
   selectedPlankId: string | null;
-  selectedWoodType: WoodType;
-  onSelectWoodType: (woodType: WoodType) => void;
-  onUpdatePlankWoodType?: (id: string, woodType: WoodType) => void;
   simulationStats: SimulationStats;
-  onSelectLevel: (levelId: number) => void;
-  onAddPlank: () => void;
+  lastRunScore: number;
+  onSpawnPlank: (woodType: WoodType) => void;
+  onCommitPlank: () => void;
   onRemovePlank: (id: string) => void;
   onRotatePlankStep: (id: string, deltaDegrees: number) => void;
   onSetPlankAngle: (id: string, angleDegrees: number) => void;
   onStartDrop: () => void;
   onResetLevel: () => void;
-  onReplay?: () => void;
-  onZoomIn: () => void;
-  onZoomOut: () => void;
-  onResetCamera: () => void;
+  onReplay: () => void;
+  onNextLevel: () => void;
+  onRestartRun: () => void;
 }
 
 export const GameHUD: React.FC<GameHUDProps> = ({
   currentLevel,
-  levelsList,
-  maxUnlockedLevel,
-  levelStars,
+  totalLevels,
   gameState,
+  points,
+  heldPlankId,
   placedPlanks,
   selectedPlankId,
-  selectedWoodType,
-  onSelectWoodType,
-  onUpdatePlankWoodType,
   simulationStats,
-  onSelectLevel,
-  onAddPlank,
+  lastRunScore,
+  onSpawnPlank,
+  onCommitPlank,
   onRemovePlank,
   onRotatePlankStep,
   onSetPlankAngle,
   onStartDrop,
   onResetLevel,
   onReplay,
-  onZoomIn,
-  onZoomOut,
-  onResetCamera,
+  onNextLevel,
+  onRestartRun,
 }) => {
   const [isSoundOn, setIsSoundOn] = useState(true);
   const [showHintModal, setShowHintModal] = useState(false);
+
+  const playClick = () => soundManager.play('ui_click');
 
   const toggleSound = () => {
     const next = !isSoundOn;
@@ -86,427 +84,369 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   };
 
   const selectedPlank = placedPlanks.find((p) => p.id === selectedPlankId);
-  const remainingPlanks = currentLevel.availablePlanksCount - placedPlanks.length;
-  const playClick = () => soundManager.play('ui_click');
-  const currentRunStars = gameState === 'WON' ? calculateStars(simulationStats, currentLevel) : 0;
+  const isEditing = gameState === 'EDITING';
+  const isFinished = gameState === 'WON' || gameState === 'FAILED';
 
-  const StarRow: React.FC<{ count: number; size?: number }> = ({ count, size = 22 }) => (
-    <div className="flex items-center justify-center gap-1">
-      {[1, 2, 3].map((i) => (
-        <Star
-          key={i}
-          style={{ width: size, height: size }}
-          className={i <= count ? 'text-[#FFB300] fill-[#FFB300]' : 'text-[#C4C6D0] fill-transparent'}
-        />
-      ))}
-    </div>
+  // Before the drop the barometer shows the level's authored height; during the
+  // fall it tracks the leading boulder live.
+  const altitude = isEditing ? currentLevel.dropHeightMeters : simulationStats.ballAltitudeMeters;
+  const altitudeRatio = Math.max(0, Math.min(1, altitude / currentLevel.dropHeightMeters));
+
+  // Heaviest boulder in the level, shown as a readable weight. Matter.js mass is
+  // density x area in engine units, scaled here purely for presentation.
+  const boulderMassKg = Math.round(
+    Math.max(...currentLevel.balls.map((b) => b.density * Math.PI * b.radius * b.radius)) * 10
   );
 
   return (
-    <div className="absolute inset-0 pointer-events-none flex flex-col justify-between p-3 sm:p-4 select-none font-sans">
-      {/* --- TOP HEADER BAR --- */}
-      <header className="flex items-center justify-between px-4 sm:px-6 py-2.5 bg-white border border-[#E1E2EC] rounded-3xl shadow-sm pointer-events-auto">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-[#005AC1] rounded-full flex items-center justify-center text-white shadow-sm">
-            <Shield className="w-5 h-5 fill-current" />
-          </div>
-          <div>
-            <div className="flex items-center gap-1.5">
-              <select
-                value={currentLevel.id}
-                onChange={(e) => {
-                  playClick();
-                  onSelectLevel(Number(e.target.value));
-                }}
-                className="bg-transparent text-[16px] font-semibold text-[#1B1B1F] leading-tight outline-none cursor-pointer hover:text-[#005AC1] transition"
-              >
-                {levelsList.map((lvl) => (
-                  <option key={lvl.id} value={lvl.id} className="bg-white text-[#1B1B1F]">
-                    {lvl.title}
-                    {levelStars[lvl.id] ? ` ${'★'.repeat(levelStars[lvl.id])}` : ''}
-                  </option>
-                ))}
-              </select>
+    <div className="absolute inset-0 pointer-events-none select-none font-sans text-white">
+      {/* --- TOP BAR --- */}
+      <header className="absolute top-0 left-0 right-0 flex items-start justify-between gap-2 p-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <div className="pointer-events-auto bg-black/35 backdrop-blur-md rounded-2xl px-3 py-1.5 shadow-lg min-w-0">
+            <div className="text-[9px] font-bold uppercase tracking-[0.1em] text-white/60 leading-none">
+              Level {currentLevel.id}
+              <span className="text-white/35"> / {totalLevels}</span>
             </div>
-            <p className="text-[12px] text-[#44474F] font-medium">Cat Defender Physics</p>
+            <div className="text-[13px] font-bold leading-tight mt-0.5 truncate">{currentLevel.title}</div>
+          </div>
+
+          <div className="pointer-events-auto flex items-center gap-1 bg-[#FFB300] text-[#3A2600] rounded-2xl px-2.5 py-2 shadow-lg font-bold shrink-0">
+            <Coins className="w-3.5 h-3.5" />
+            <span className="text-[13px] tabular-nums">{points}</span>
           </div>
         </div>
 
-        {/* Right Top Action Buttons */}
-        <div className="flex items-center gap-2">
-          {/* Hint Button */}
+        <div className="flex items-center gap-1.5 shrink-0">
           <button
             onClick={() => {
               playClick();
               setShowHintModal(true);
             }}
-            className="w-10 h-10 flex items-center justify-center rounded-full bg-[#F3F4F9] text-[#005AC1] hover:bg-[#E1E2EC] active:scale-95 transition min-w-[40px] min-h-[40px]"
-            title="Level Hint"
+            className="pointer-events-auto w-10 h-10 flex items-center justify-center rounded-full bg-black/35 backdrop-blur-md active:scale-95 transition shadow-lg"
+            aria-label="Level hint"
           >
             <HelpCircle className="w-5 h-5" />
           </button>
-
-          {/* Sound Mute/Unmute */}
           <button
             onClick={toggleSound}
-            className="w-10 h-10 flex items-center justify-center rounded-full bg-[#F3F4F9] text-[#44474F] hover:bg-[#E1E2EC] active:scale-95 transition min-w-[40px] min-h-[40px]"
-            title="Toggle Sound"
+            className="pointer-events-auto w-10 h-10 flex items-center justify-center rounded-full bg-black/35 backdrop-blur-md active:scale-95 transition shadow-lg"
+            aria-label={isSoundOn ? 'Mute sound' : 'Unmute sound'}
           >
-            {isSoundOn ? <Volume2 className="w-5 h-5 text-[#005AC1]" /> : <VolumeX className="w-5 h-5 text-[#74777F]" />}
+            {isSoundOn ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5 text-white/50" />}
           </button>
         </div>
       </header>
 
-      {/* --- TOP BADGES OVERLAY (Planks inventory & Gravity) --- */}
-      <div className="flex justify-between items-start pt-2 px-2 pointer-events-none">
-        <div className="bg-[#DBE2F9] px-4 py-2 rounded-full text-[#001D39] text-xs font-semibold border border-[#005AC1]/10 shadow-sm flex items-center gap-1.5 pointer-events-auto">
-          <Layers className="w-3.5 h-3.5 text-[#005AC1]" />
-          Planks: <span className="font-bold text-[#005AC1]">{placedPlanks.length} / {currentLevel.availablePlanksCount}</span>
-        </div>
-        <div className="bg-[#F4FBFA] px-4 py-2 rounded-full text-[#00201E] text-xs font-semibold border border-[#B1F1EB] shadow-sm flex items-center gap-1.5 pointer-events-auto">
-          <Compass className="w-3.5 h-3.5 text-[#006A60]" />
-          Gravity: 9.8m/s²
-        </div>
-      </div>
-
-      {/* --- CAMERA CONTROLS (Right Floating Stack) --- */}
-      <div className="absolute right-3 sm:right-5 top-24 flex flex-col gap-2 pointer-events-auto">
-        <button
-          onClick={() => {
-            playClick();
-            onZoomIn();
-          }}
-          className="w-10 h-10 rounded-full bg-white border border-[#E1E2EC] text-[#005AC1] flex items-center justify-center hover:bg-[#F3F4F9] active:scale-95 transition shadow-sm min-w-[40px] min-h-[40px]"
-          title="Zoom In"
-        >
-          <ZoomIn className="w-5 h-5" />
-        </button>
-        <button
-          onClick={() => {
-            playClick();
-            onZoomOut();
-          }}
-          className="w-10 h-10 rounded-full bg-white border border-[#E1E2EC] text-[#005AC1] flex items-center justify-center hover:bg-[#F3F4F9] active:scale-95 transition shadow-sm min-w-[40px] min-h-[40px]"
-          title="Zoom Out"
-        >
-          <ZoomOut className="w-5 h-5" />
-        </button>
-        <button
-          onClick={() => {
-            playClick();
-            onResetCamera();
-          }}
-          className="w-10 h-10 rounded-full bg-white border border-[#E1E2EC] text-[#005AC1] flex items-center justify-center hover:bg-[#F3F4F9] active:scale-95 transition shadow-sm min-w-[40px] min-h-[40px]"
-          title="Reset View"
-        >
-          <Maximize2 className="w-5 h-5" />
-        </button>
-      </div>
-
-      {/* --- WOOD MATERIAL SELECTOR BAR --- */}
-      {gameState === 'EDITING' && (
-        <div className="self-center mb-2 pointer-events-auto bg-white/95 backdrop-blur-md border border-[#E1E2EC] rounded-full p-1.5 shadow-md flex items-center gap-1 sm:gap-2 max-w-full overflow-x-auto">
-          <div className="px-2.5 text-[11px] font-bold uppercase tracking-wider text-[#74777F] hidden sm:block">
-            Wood Type:
+      {/* --- ALTITUDE BAROMETER (left rail) --- */}
+      <div className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none flex flex-col items-center gap-2">
+        <div className="bg-black/35 backdrop-blur-md rounded-2xl px-2.5 py-3 flex flex-col items-center gap-2 shadow-lg">
+          <div className="text-[15px] font-bold tabular-nums leading-none">
+            {altitude.toFixed(altitude < 10 ? 1 : 0)}
+            <span className="text-[10px] font-semibold text-white/60 ml-0.5">m</span>
           </div>
-          {(Object.keys(WOOD_MATERIALS) as WoodType[]).map((wType) => {
-            const mat = WOOD_MATERIALS[wType];
-            const activePlankType = selectedPlank ? (selectedPlank.woodType || 'OAK') : selectedWoodType;
-            const isSelected = activePlankType === wType;
+
+          {/* Vertical gauge: filled portion is how far the boulder still has to fall */}
+          <div className="relative w-2 h-32 rounded-full bg-white/15 overflow-hidden">
+            <div
+              className="absolute left-0 right-0 bottom-0 bg-gradient-to-t from-[#FFB300] to-[#FF7043] rounded-full transition-[height] duration-100"
+              style={{ height: `${altitudeRatio * 100}%` }}
+            />
+          </div>
+
+          <div className="text-[9px] font-bold tracking-wider text-white/45 leading-none">0m</div>
+        </div>
+      </div>
+
+      {/* --- INVENTORY RAIL (right) --- */}
+      {isEditing && (
+        <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-auto flex flex-col gap-2">
+          {WOOD_ORDER.map((woodType) => {
+            const mat = WOOD_MATERIALS[woodType];
+            const price = plankPrice(woodType);
+            const affordable = Math.floor(points / price);
+            const disabled = affordable < 1 || !!heldPlankId;
+
             return (
               <button
-                key={wType}
-                onClick={() => {
-                  playClick();
-                  onSelectWoodType(wType);
-                  if (selectedPlank && onUpdatePlankWoodType) {
-                    onUpdatePlankWoodType(selectedPlank.id, wType);
-                  }
-                }}
-                className={`px-3 py-1.5 rounded-full text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
-                  isSelected
-                    ? 'bg-[#005AC1] text-white shadow-sm scale-105'
-                    : 'bg-[#F3F4F9] text-[#44474F] hover:bg-[#E1E2EC]'
+                key={woodType}
+                onClick={() => !disabled && onSpawnPlank(woodType)}
+                disabled={disabled}
+                className={`relative w-[58px] rounded-2xl px-1.5 py-2 flex flex-col items-center gap-1.5 shadow-lg backdrop-blur-md transition active:scale-95 ${
+                  disabled ? 'bg-black/25 opacity-40' : 'bg-black/40 hover:bg-black/50'
                 }`}
+                aria-label={`${mat.name} plank`}
               >
-                <span
-                  className="w-2.5 h-2.5 rounded-full border border-black/20"
+                <img
+                  src={WOOD_SPRITES[woodType]}
+                  alt=""
+                  className="w-full h-4 object-cover rounded-[3px]"
                   style={{ backgroundColor: mat.color }}
                 />
-                {mat.name} <span className="text-[10px] opacity-80">({mat.maxHealth} HP)</span>
+                <div className="flex items-center gap-0.5 text-[10px] font-bold tabular-nums text-[#FFD54F]">
+                  <Coins className="w-2.5 h-2.5" />
+                  {price}
+                </div>
+                <div className="text-[11px] font-bold tabular-nums leading-none text-white/70">
+                  <span className="text-white/40 text-[9px]">×</span>
+                  {affordable}
+                </div>
               </button>
             );
           })}
         </div>
       )}
 
-      {/* --- FLOATING SELECTED PLANK TOOLBAR --- */}
-      {gameState === 'EDITING' && selectedPlank && (
-        <div className="self-center mb-3 pointer-events-auto bg-white border-2 border-[#C4C6D0] rounded-3xl p-2.5 sm:p-3 shadow-xl flex items-center justify-center gap-3 sm:gap-4 max-w-full overflow-x-auto">
+      {/* --- BOULDER BRIEFING BUBBLE ---
+           Shown while building so the player can plan against real numbers;
+           it disappears the moment the level starts. */}
+      {isEditing && !heldPlankId && (
+        <div className="absolute bottom-[92px] left-1/2 -translate-x-1/2 pointer-events-none bg-black/45 backdrop-blur-md rounded-2xl px-3.5 py-2 shadow-lg flex items-center gap-3.5">
+          <div className="flex items-center gap-1.5">
+            <Ruler className="w-3.5 h-3.5 text-[#FFD54F]" />
+            <span className="text-[13px] font-bold tabular-nums">
+              {currentLevel.dropHeightMeters}
+              <span className="text-[10px] text-white/55 ml-0.5">m</span>
+            </span>
+          </div>
+          <div className="w-px h-4 bg-white/20" />
+          <div className="flex items-center gap-1.5">
+            <Weight className="w-3.5 h-3.5 text-[#FFD54F]" />
+            <span className="text-[13px] font-bold tabular-nums">
+              {boulderMassKg}
+              <span className="text-[10px] text-white/55 ml-0.5">kg</span>
+            </span>
+          </div>
+          {currentLevel.balls.length > 1 && (
+            <>
+              <div className="w-px h-4 bg-white/20" />
+              <span className="text-[13px] font-bold tabular-nums">×{currentLevel.balls.length}</span>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* --- SELECTED PLANK TOOLBAR --- */}
+      {isEditing && selectedPlank && selectedPlank.id === heldPlankId && (
+        <div className="absolute bottom-[92px] left-1/2 -translate-x-1/2 pointer-events-auto bg-black/55 backdrop-blur-md rounded-full p-1.5 flex items-center gap-1 shadow-xl">
           <button
             onClick={() => {
               playClick();
               onRotatePlankStep(selectedPlank.id, -15);
             }}
-            className="flex flex-col items-center gap-1 group active:scale-95 transition min-w-[50px]"
+            className="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center active:scale-95 transition"
+            aria-label="Rotate left"
           >
-            <div className="w-11 h-8 bg-[#DDE1FF] rounded-full flex items-center justify-center text-[#001453]">
-              <RotateLeftIcon className="w-4 h-4" />
-            </div>
-            <span className="text-[10px] font-bold uppercase tracking-wider text-[#44474F]">-15°</span>
+            <RotateLeftIcon className="w-5 h-5" />
           </button>
-
           <button
             onClick={() => {
               playClick();
               onRotatePlankStep(selectedPlank.id, 15);
             }}
-            className="flex flex-col items-center gap-1 group active:scale-95 transition min-w-[50px]"
+            className="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center active:scale-95 transition"
+            aria-label="Rotate right"
           >
-            <div className="w-11 h-8 bg-[#DDE1FF] rounded-full flex items-center justify-center text-[#001453]">
-              <RotateCw className="w-4 h-4" />
-            </div>
-            <span className="text-[10px] font-bold uppercase tracking-wider text-[#44474F]">+15°</span>
+            <RotateCw className="w-5 h-5" />
           </button>
-
           <button
             onClick={() => {
               playClick();
               onSetPlankAngle(selectedPlank.id, 0);
             }}
-            className="flex flex-col items-center gap-1 group active:scale-95 transition min-w-[50px]"
+            className="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-[12px] font-bold active:scale-95 transition"
+            aria-label="Set flat"
           >
-            <div className="w-11 h-8 bg-[#F3F4F9] hover:bg-[#E1E2EC] rounded-full flex items-center justify-center text-[#005AC1] text-xs font-bold">
-              0°
-            </div>
-            <span className="text-[10px] font-bold uppercase tracking-wider text-[#44474F]">FLAT</span>
+            0°
           </button>
-
           <button
             onClick={() => {
               playClick();
               onSetPlankAngle(selectedPlank.id, 45);
             }}
-            className="flex flex-col items-center gap-1 group active:scale-95 transition min-w-[50px]"
+            className="w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-[12px] font-bold active:scale-95 transition"
+            aria-label="Set diagonal"
           >
-            <div className="w-11 h-8 bg-[#F3F4F9] hover:bg-[#E1E2EC] rounded-full flex items-center justify-center text-[#005AC1] text-xs font-bold">
-              45°
-            </div>
-            <span className="text-[10px] font-bold uppercase tracking-wider text-[#44474F]">DIAG</span>
+            45°
           </button>
 
-          <div className="w-px h-8 bg-[#E1E2EC] mx-0.5" />
+          <div className="w-px h-7 bg-white/20 mx-0.5" />
 
           <button
             onClick={() => {
               playClick();
               onRemovePlank(selectedPlank.id);
             }}
-            className="flex flex-col items-center gap-1 group active:scale-95 transition min-w-[50px]"
-            title="Delete Plank"
+            className="w-11 h-11 rounded-full bg-[#BA1A1A]/80 hover:bg-[#BA1A1A] flex items-center justify-center active:scale-95 transition"
+            aria-label="Delete plank"
           >
-            <div className="w-11 h-8 bg-[#FFDAD6] hover:bg-[#FFB4AB] rounded-full flex items-center justify-center text-[#410002]">
-              <Trash2 className="w-4 h-4 text-[#BA1A1A]" />
-            </div>
-            <span className="text-[10px] font-bold uppercase tracking-wider text-[#BA1A1A]">DELETE</span>
+            <Trash2 className="w-5 h-5" />
+          </button>
+
+          {/* Confirm placement: the plank is handed over to gravity */}
+          <button
+            onClick={onCommitPlank}
+            className="h-11 px-4 rounded-full bg-[#2E7D32] hover:bg-[#256628] flex items-center justify-center gap-1.5 font-extrabold text-sm active:scale-95 transition"
+            aria-label="Place plank"
+          >
+            <Check className="w-5 h-5" /> PLACE
           </button>
         </div>
       )}
 
-      {/* --- BOTTOM ACTION FOOTER --- */}
-      <footer className="pointer-events-auto h-20 sm:h-22 px-4 sm:px-6 bg-white flex items-center justify-between gap-3 sm:gap-4 border border-[#E1E2EC] rounded-3xl shadow-[0_-4px_16px_rgba(0,0,0,0.06)]">
-        {gameState === 'EDITING' ? (
-          <>
-            {/* Reset / Add Plank outline button */}
-            <button
-              onClick={() => {
-                playClick();
-                onAddPlank();
-              }}
-              disabled={remainingPlanks <= 0}
-              className={`flex-1 h-12 sm:h-14 rounded-full border border-[#74777F] font-semibold text-sm sm:text-base flex items-center justify-center gap-2 active:bg-[#F3F4F9] transition ${
-                remainingPlanks > 0
-                  ? 'text-[#005AC1] border-[#005AC1] cursor-pointer'
-                  : 'text-[#74777F] border-[#E1E2EC] opacity-50 cursor-not-allowed'
-              }`}
-            >
-              <Plus className="w-5 h-5" /> Add Plank
-            </button>
-
-            {/* Drop Boulder primary button */}
-            <button
-              onClick={onStartDrop}
-              disabled={placedPlanks.length === 0}
-              className={`flex-[2] h-12 sm:h-14 bg-[#005AC1] rounded-full text-white font-bold text-base sm:text-lg flex items-center justify-center gap-2 sm:gap-3 shadow-md transition-all ${
-                placedPlanks.length > 0
-                  ? 'hover:bg-[#004395] active:scale-95 cursor-pointer shadow-[#005AC1]/20'
-                  : 'bg-[#C4C6D0] cursor-not-allowed text-[#E1E2EC]'
-              }`}
-            >
-              <Play className="w-5 h-5 fill-current" /> DROP BOULDER
-            </button>
-          </>
+      {/* --- BOTTOM ACTION --- */}
+      <div className="absolute bottom-0 left-0 right-0 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+        {isEditing ? (
+          <button
+            onClick={() => {
+              playClick();
+              onStartDrop();
+            }}
+            disabled={placedPlanks.length === 0}
+            className={`pointer-events-auto w-full h-14 rounded-2xl font-extrabold text-lg tracking-wide flex items-center justify-center gap-2.5 shadow-xl transition ${
+              placedPlanks.length > 0
+                ? 'bg-[#005AC1] hover:bg-[#004395] active:scale-[0.98] text-white'
+                : 'bg-black/30 backdrop-blur-md text-white/40 cursor-not-allowed'
+            }`}
+          >
+            <Play className="w-5 h-5 fill-current" /> START
+          </button>
         ) : (
-          /* Simulation active bar */
-          <div className="flex items-center justify-between w-full">
-            <div className="flex items-center gap-3 text-xs sm:text-sm font-semibold text-[#1B1B1F]">
-              <span className="flex items-center gap-1.5 text-[#005AC1] font-bold bg-[#DBE2F9] px-3 py-1.5 rounded-full border border-[#005AC1]/10">
-                <ShieldCheck className="w-4 h-4" /> Simulating
-              </span>
-              <span className="hidden sm:inline text-[#44474F]">Impact Force: <b className="text-[#001D39] font-bold">{simulationStats.maxImpactForce} N</b></span>
-            </div>
-
+          !isFinished && (
             <button
               onClick={() => {
                 playClick();
                 onResetLevel();
               }}
-              className="h-12 px-6 rounded-full border border-[#74777F] text-[#005AC1] font-semibold text-sm flex items-center justify-center gap-2 active:bg-[#F3F4F9] transition"
+              className="pointer-events-auto w-full h-14 rounded-2xl bg-black/40 backdrop-blur-md font-bold flex items-center justify-center gap-2 shadow-xl active:scale-[0.98] transition"
             >
-              <RotateCcw className="w-4 h-4" /> Reset / Edit
+              <RotateCcw className="w-5 h-5" /> Rebuild
             </button>
-          </div>
+          )
         )}
-      </footer>
+      </div>
 
-      {/* --- LEVEL HINT MODAL --- */}
+      {/* --- HINT MODAL --- */}
       {showHintModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#001D39]/60 backdrop-blur-sm pointer-events-auto">
-          <div className="bg-white border-2 border-[#C4C6D0] rounded-[32px] p-6 max-w-md w-full shadow-2xl space-y-4">
-            <div className="flex items-center gap-3 text-[#005AC1]">
-              <div className="w-10 h-10 rounded-full bg-[#DBE2F9] flex items-center justify-center">
-                <Info className="w-5 h-5 text-[#005AC1]" />
-              </div>
-              <h3 className="text-xl font-bold text-[#1B1B1F]">{currentLevel.title}</h3>
-            </div>
-            <p className="text-sm text-[#44474F] leading-relaxed">{currentLevel.description}</p>
-            {currentLevel.hints && currentLevel.hints.length > 0 && (
-              <div className="bg-[#F3F4F9] border border-[#E1E2EC] rounded-2xl p-4 space-y-2">
-                {currentLevel.hints.map((h, i) => (
-                  <p key={i} className="text-xs text-[#001D39] font-medium flex items-start gap-2">
-                    <span className="text-[#005AC1] font-bold">•</span> {h}
-                  </p>
-                ))}
-              </div>
-            )}
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-5 bg-[#00243D]/70 backdrop-blur-sm pointer-events-auto">
+          <div className="bg-[#0E3556] border border-white/15 rounded-3xl p-5 max-w-[330px] w-full shadow-2xl space-y-3">
+            <h3 className="text-xl font-bold">{currentLevel.title}</h3>
+            <p className="text-sm text-white/70 leading-relaxed">{currentLevel.description}</p>
+            {currentLevel.hints?.map((h, i) => (
+              <p key={i} className="text-sm text-[#FFD54F] bg-white/5 rounded-2xl p-3 leading-relaxed">
+                {h}
+              </p>
+            ))}
             <button
-              onClick={() => setShowHintModal(false)}
-              className="w-full h-12 bg-[#005AC1] hover:bg-[#004395] text-white font-bold rounded-full transition active:scale-95 min-h-[44px]"
+              onClick={() => {
+                playClick();
+                setShowHintModal(false);
+              }}
+              className="w-full h-12 bg-[#005AC1] hover:bg-[#004395] font-bold rounded-2xl transition active:scale-[0.98]"
             >
-              Got it!
+              Got it
             </button>
           </div>
         </div>
       )}
 
-      {/* --- GAME OVER / WIN MODAL OVERLAYS --- */}
-      {(gameState === 'WON' || gameState === 'FAILED') && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#001D39]/65 backdrop-blur-md pointer-events-auto">
-          <div className="bg-white border-2 border-[#C4C6D0] rounded-[32px] p-6 sm:p-8 max-w-md w-full shadow-2xl text-center space-y-5 animate-in fade-in zoom-in-95 duration-200">
+      {/* --- WIN / LOSE --- */}
+      {isFinished && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-5 bg-[#00243D]/75 backdrop-blur-md pointer-events-auto">
+          <div className="bg-[#0E3556] border border-white/15 rounded-3xl p-6 max-w-[330px] w-full shadow-2xl text-center space-y-4">
             {gameState === 'WON' ? (
               <>
-                <div className="w-20 h-20 mx-auto rounded-full bg-[#386A20]/10 border-2 border-[#386A20]/30 flex items-center justify-center text-[#2E6B12]">
-                  <Trophy className="w-10 h-10" />
+                <div className="w-16 h-16 mx-auto rounded-full bg-[#FFB300]/20 border-2 border-[#FFB300]/40 flex items-center justify-center text-[#FFB300]">
+                  <Trophy className="w-8 h-8" />
                 </div>
                 <div>
-                  <h2 className="text-2xl sm:text-3xl font-bold text-[#1B1B1F]">CAT PROTECTED!</h2>
-                  <p className="text-sm text-[#44474F] mt-1">Your wooden shelter held strong against the falling impact.</p>
+                  <h2 className="text-2xl font-extrabold">CAT PROTECTED</h2>
+                  <p className="text-sm text-white/60 mt-1">Your shelter held.</p>
                 </div>
 
-                <StarRow count={currentRunStars} size={32} />
+                <div className="flex items-center justify-center gap-1.5 text-[#FFD54F] text-2xl font-extrabold tabular-nums">
+                  <Coins className="w-6 h-6" />+{lastRunScore}
+                </div>
 
-                {/* Physics Stats Card */}
-                <div className="bg-[#F3F4F9] border border-[#E1E2EC] rounded-2xl p-4 text-left space-y-2 text-xs sm:text-sm text-[#44474F]">
+                <div className="bg-white/5 rounded-2xl p-3 space-y-1.5 text-sm text-white/70">
                   <div className="flex justify-between">
-                    <span>Max Impact Energy:</span>
-                    <b className="text-[#005AC1] font-bold">{simulationStats.maxImpactForce} N</b>
+                    <span>Peak impact</span>
+                    <b className="text-white tabular-nums">{simulationStats.maxImpactForce} N</b>
                   </div>
                   <div className="flex justify-between">
-                    <span>Planks Intact:</span>
-                    <b className="text-[#2E6B12] font-bold">{placedPlanks.length - simulationStats.planksBrokenCount} / {placedPlanks.length}</b>
+                    <span>Planks used</span>
+                    <b className="text-white tabular-nums">{placedPlanks.length}</b>
                   </div>
                   <div className="flex justify-between">
-                    <span>Planks Snapped:</span>
-                    <b className="text-[#BA1A1A] font-bold">{simulationStats.planksBrokenCount}</b>
+                    <span>Planks snapped</span>
+                    <b className="text-white tabular-nums">{simulationStats.planksBrokenCount}</b>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 pt-2">
+                <div className="grid grid-cols-2 gap-2.5">
                   <button
                     onClick={() => {
                       playClick();
-                      (onReplay || onResetLevel)();
+                      onReplay();
                     }}
-                    className="h-12 border-2 border-[#005AC1] text-[#005AC1] hover:bg-[#005AC1]/10 font-bold rounded-full transition active:scale-95 flex items-center justify-center gap-1.5 text-xs sm:text-sm cursor-pointer"
+                    className="h-12 rounded-2xl border border-white/25 hover:bg-white/10 font-bold text-sm transition active:scale-95 flex items-center justify-center gap-1.5"
                   >
                     <RotateCcw className="w-4 h-4" /> Replay
                   </button>
                   <button
                     onClick={() => {
                       playClick();
-                      onResetLevel();
+                      onNextLevel();
                     }}
-                    className="h-12 border border-[#74777F] text-[#44474F] hover:bg-[#F3F4F9] font-semibold rounded-full transition active:scale-95 flex items-center justify-center gap-1.5 text-xs sm:text-sm cursor-pointer"
+                    className="h-12 rounded-2xl bg-[#005AC1] hover:bg-[#004395] font-bold text-sm transition active:scale-95 shadow-lg flex items-center justify-center gap-1"
                   >
-                    Edit / Rebuild
+                    {currentLevel.id < totalLevels ? 'Next' : 'Restart'} <ChevronRight className="w-4 h-4" />
                   </button>
-                  {currentLevel.id < levelsList.length ? (
-                    <button
-                      onClick={() => {
-                        playClick();
-                        onSelectLevel(currentLevel.id + 1);
-                      }}
-                      className="col-span-2 sm:col-span-1 h-12 flex items-center justify-center gap-1.5 bg-[#005AC1] hover:bg-[#004395] text-white font-bold rounded-full transition active:scale-95 shadow-md text-xs sm:text-sm cursor-pointer"
-                    >
-                      Next Level <ChevronRight className="w-4 h-4" />
-                    </button>
-                  ) : (
-                    <button
-                      onClick={() => {
-                        playClick();
-                        onSelectLevel(1);
-                      }}
-                      className="col-span-2 sm:col-span-1 h-12 bg-[#005AC1] hover:bg-[#004395] text-white font-bold rounded-full transition active:scale-95 shadow-md text-xs sm:text-sm cursor-pointer"
-                    >
-                      Play Again
-                    </button>
-                  )}
                 </div>
               </>
             ) : (
               <>
-                <div className="w-20 h-20 mx-auto rounded-full bg-[#BA1A1A]/10 border-2 border-[#BA1A1A]/30 flex items-center justify-center text-[#BA1A1A]">
-                  <AlertTriangle className="w-10 h-10" />
+                <div className="w-16 h-16 mx-auto rounded-full bg-[#BA1A1A]/20 border-2 border-[#BA1A1A]/40 flex items-center justify-center text-[#FF6B6B]">
+                  <AlertTriangle className="w-8 h-8" />
                 </div>
                 <div>
-                  <h2 className="text-2xl sm:text-3xl font-bold text-[#1B1B1F]">STRUCTURE COLLAPSED!</h2>
-                  <p className="text-sm text-[#44474F] mt-1">The falling force broke through your shelter and reached the cat.</p>
+                  <h2 className="text-2xl font-extrabold">SHELTER FAILED</h2>
+                  <p className="text-sm text-white/60 mt-1">
+                    The boulder reached the cat. Back to level 1.
+                  </p>
                 </div>
 
-                <div className="bg-[#F3F4F9] border border-[#E1E2EC] rounded-2xl p-4 text-left space-y-2 text-xs sm:text-sm text-[#44474F]">
+                <div className="bg-white/5 rounded-2xl p-3 space-y-1.5 text-sm text-white/70">
                   <div className="flex justify-between">
-                    <span>Collision Force Received:</span>
-                    <b className="text-[#BA1A1A] font-bold">{simulationStats.maxImpactForce} N</b>
+                    <span>Impact taken</span>
+                    <b className="text-[#FF6B6B] tabular-nums">{simulationStats.catImpactForce} N</b>
                   </div>
                   <div className="flex justify-between">
-                    <span>Cat Max Tolerance:</span>
-                    <b className="text-[#005AC1] font-bold">{currentLevel.cat.maxDamageForce} N</b>
+                    <span>Cat tolerance</span>
+                    <b className="text-white tabular-nums">{currentLevel.cat.maxDamageForce} N</b>
                   </div>
                 </div>
 
-                <div className="bg-[#DBE2F9]/50 border border-[#005AC1]/20 rounded-2xl p-3 text-xs text-[#001D39] text-left">
-                  <b>Physics Tip:</b> Lean planks at angles to form triangular roofs! Direct horizontal flat planks break easily under heavy vertical loads.
+                <div className="grid grid-cols-2 gap-2.5">
+                  <button
+                    onClick={() => {
+                      playClick();
+                      onResetLevel();
+                    }}
+                    className="h-12 rounded-2xl border border-white/25 hover:bg-white/10 font-bold text-sm transition active:scale-95 flex items-center justify-center gap-1.5"
+                  >
+                    <RotateCcw className="w-4 h-4" /> Retry
+                  </button>
+                  <button
+                    onClick={() => {
+                      playClick();
+                      onRestartRun();
+                    }}
+                    className="h-12 rounded-2xl bg-[#005AC1] hover:bg-[#004395] font-bold text-sm transition active:scale-95 shadow-lg"
+                  >
+                    Level 1
+                  </button>
                 </div>
-
-                <button
-                  onClick={() => {
-                    playClick();
-                    onResetLevel();
-                  }}
-                  className="w-full h-12 flex items-center justify-center gap-2 bg-[#005AC1] hover:bg-[#004395] text-white font-bold rounded-full transition active:scale-95 shadow-md"
-                >
-                  <RotateCcw className="w-5 h-5" /> Try Again & Rebuild
-                </button>
               </>
             )}
           </div>

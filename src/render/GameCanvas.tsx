@@ -15,6 +15,8 @@ interface GameCanvasProps {
   zoomLevel: number;
   panOffset: { x: number; y: number };
   onPanChange: (offset: { x: number; y: number }) => void;
+  onZoomChange: (zoom: number) => void;
+  onResetCamera: () => void;
 }
 
 // --- Sprite loading (claymation asset pass) ---
@@ -39,6 +41,13 @@ const BOULDER_SPRITES = {
   iron: loadSprite('/assets/boulder_iron.png'),
 };
 const GROUND_SPRITE = loadSprite('/assets/ground_terrain.png');
+const CAT_SPRITE = loadSprite('/assets/cat_idle.png');
+const CLOUD_SPRITES = [
+  loadSprite('/assets/cloud_cream_1.png'),
+  loadSprite('/assets/cloud_blue_1.png'),
+  loadSprite('/assets/cloud_cream_2.png'),
+  loadSprite('/assets/cloud_blue_2.png'),
+];
 const PLANK_SPRITES: Record<WoodType, HTMLImageElement> = {
   PINE: loadSprite('/assets/plank_pine.png'),
   OAK: loadSprite('/assets/plank_oak.png'),
@@ -87,6 +96,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   zoomLevel,
   panOffset,
   onPanChange,
+  onZoomChange,
+  onResetCamera,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -102,16 +113,21 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
   // Background clouds, scattered once per level so they hold still rather than
   // re-randomizing every frame
-  const cloudsRef = useRef<{ x: number; y: number; scale: number; drift: number }[]>([]);
+  const cloudsRef = useRef<{ x: number; y: number; scale: number; sprite: number }[]>([]);
   useEffect(() => {
+    // Clouds live in the upper sky only. The build zone is the ~300px directly
+    // above the cat and must stay visually clear.
+    const buildZoneTop = currentLevel.groundY - 340;
+    const skyTop = 60;
     const count = 5;
     const clouds = [];
     for (let i = 0; i < count; i++) {
+      const band = Math.max(80, buildZoneTop - skyTop);
       clouds.push({
-        x: (currentLevel.worldWidth / count) * i + Math.random() * 80,
-        y: 40 + Math.random() * (currentLevel.groundY * 0.35),
-        scale: 0.7 + Math.random() * 0.8,
-        drift: 0.05 + Math.random() * 0.08,
+        x: 40 + Math.random() * (currentLevel.worldWidth - 80),
+        y: skyTop + (band / count) * i + Math.random() * (band / count) * 0.6,
+        scale: 0.5 + Math.random() * 0.45,
+        sprite: i,
       });
     }
     cloudsRef.current = clouds;
@@ -178,6 +194,10 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   const touchStartDistRef = useRef<number | null>(null);
   const touchStartAngleRef = useRef<number | null>(null);
 
+  // Double-tap zoom tracking
+  const lastTapRef = useRef<{ t: number; x: number; y: number } | null>(null);
+  const [isZoomedIn, setIsZoomedIn] = useState(false);
+
   // Convert screen coordinates to canvas world coordinates
   const screenToWorld = useCallback(
     (screenX: number, screenY: number) => {
@@ -243,11 +263,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       ctx.translate(panOffset.x + shakeX, panOffset.y + shakeY);
       ctx.scale(zoomLevel, zoomLevel);
 
-      // --- 1. DRAW WORLD BACKGROUND: CLOUDS, PLACEMENT GRID (editing only) ---
+      // --- 1. DRAW WORLD BACKGROUND ---
       drawClouds(ctx, cloudsRef.current);
-      if (gameState === 'EDITING') {
-        drawBackgroundGrid(ctx, currentLevel);
-      }
 
       // --- 2. DRAW GROUND ---
       drawGround(ctx, currentLevel);
@@ -262,27 +279,31 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
       // Draw Cat
       if (bodies.catBody) {
-        drawCat(ctx, bodies.catBody, gameState);
+        drawCat(ctx, bodies.catBody, gameState, currentLevel.cat.width, currentLevel.cat.height);
       }
 
-      // Draw Planks (In EDITING mode or SIMULATING mode)
-      if (gameState === 'EDITING') {
-        // Draw user placed planks with interactive handles
-        placedPlanks.forEach((plank) => {
-          const isSelected = plank.id === selectedPlankId;
-          drawEditablePlank(ctx, plank, isSelected);
-        });
-      } else {
-        // Draw physics bodies & damage
+      // Committed planks are simulated even while building, so they always draw
+      // from their physics body. Only the plank still held in hand is drawn from
+      // the player's authored coordinates, with its editing handles.
+      {
+        const heldPlank =
+          gameState === 'EDITING' ? placedPlanks.find((p) => !p.committed) : undefined;
+
         bodies.plankBodies.forEach((plankBody) => {
+          const plankId = (plankBody as any).customData?.plankId;
+          if (heldPlank && plankId === heldPlank.id) return;
           drawPhysicsPlank(ctx, plankBody, bodies.plankDamageStates);
         });
 
-        // Draw Snapped Fragments
-        bodies.fragmentBodies.forEach((fragBody) => {
-          drawFragment(ctx, fragBody);
-        });
+        if (heldPlank) {
+          drawEditablePlank(ctx, heldPlank, heldPlank.id === selectedPlankId);
+        }
       }
+
+      // Draw Snapped Fragments
+      bodies.fragmentBodies.forEach((fragBody) => {
+        drawFragment(ctx, fragBody);
+      });
 
       // --- 4. DRAW & UPDATE WOODEN DEBRIS PARTICLES ---
       if (particlesRef.current.length > 0) {
@@ -331,6 +352,35 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
   // Mouse / Touch Event Handlers for Placing, Moving, Rotating Planks
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    // Double-tap toggles zoom (replaces the old on-screen zoom buttons). Checked
+    // before the editing guard so it also works while the simulation is running.
+    const now = Date.now();
+    const lastTap = lastTapRef.current;
+    if (
+      lastTap &&
+      now - lastTap.t < 300 &&
+      Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < 40
+    ) {
+      lastTapRef.current = null;
+      if (isZoomedIn) {
+        setIsZoomedIn(false);
+        onResetCamera();
+      } else {
+        // Anchor the zoom on the tapped point so it stays put under the finger.
+        const anchor = screenToWorld(e.clientX, e.clientY);
+        const canvas = canvasRef.current;
+        const rect = canvas?.getBoundingClientRect();
+        const localX = e.clientX - (rect?.left ?? 0);
+        const localY = e.clientY - (rect?.top ?? 0);
+        const newZoom = Math.min(2.5, zoomLevel * 2);
+        setIsZoomedIn(true);
+        onZoomChange(newZoom);
+        onPanChange({ x: localX - anchor.x * newZoom, y: localY - anchor.y * newZoom });
+      }
+      return;
+    }
+    lastTapRef.current = { t: now, x: e.clientX, y: e.clientY };
+
     if (gameState !== 'EDITING') return;
 
     const worldPos = screenToWorld(e.clientX, e.clientY);
@@ -351,14 +401,12 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       }
     }
 
-    // 2. Check if clicked on any plank body
+    // 2. Only the plank still held in hand can be picked up and moved —
+    //    committed planks belong to the physics structure now.
     let hitPlank: PlacedPlank | null = null;
-    for (let i = placedPlanks.length - 1; i >= 0; i--) {
-      const p = placedPlanks[i];
-      if (isPointInsidePlank(worldPos.x, worldPos.y, p)) {
-        hitPlank = p;
-        break;
-      }
+    const held = placedPlanks.find((p) => !p.committed);
+    if (held && isPointInsidePlank(worldPos.x, worldPos.y, held)) {
+      hitPlank = held;
     }
 
     if (hitPlank) {
@@ -428,56 +476,39 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   };
 
   return (
-    <div ref={containerRef} className="relative w-full h-full overflow-hidden bg-[#F3F4F9] select-none p-2 sm:p-4">
-      <div className="w-full h-full rounded-[32px] border-2 border-[#C4C6D0] bg-white overflow-hidden shadow-inner relative">
-        <canvas
-          ref={canvasRef}
-          onPointerDown={handlePointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerUp}
-          onPointerLeave={handlePointerUp}
-          onWheel={handleWheel}
-          className="w-full h-full cursor-grab active:cursor-grabbing touch-none block"
-        />
-      </div>
+    <div ref={containerRef} className="absolute inset-0 overflow-hidden select-none">
+      <canvas
+        ref={canvasRef}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerLeave={handlePointerUp}
+        onWheel={handleWheel}
+        className="w-full h-full cursor-grab active:cursor-grabbing touch-none block"
+      />
     </div>
   );
 };
 
 // --- RENDER HELPER DRAWING FUNCTIONS ---
 
-function drawBackgroundGrid(ctx: CanvasRenderingContext2D, level: LevelData) {
+function drawClouds(ctx: CanvasRenderingContext2D, clouds: { x: number; y: number; scale: number; sprite: number }[]) {
   ctx.save();
-  // Faint placement-aid grid, only shown while editing — subtle against the sky
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
-  ctx.lineWidth = 1;
-
-  const gridSize = 40;
-  for (let x = 0; x < level.worldWidth; x += gridSize) {
-    ctx.beginPath();
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, level.worldHeight);
-    ctx.stroke();
-  }
-  for (let y = 0; y < level.worldHeight; y += gridSize) {
-    ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(level.worldWidth, y);
-    ctx.stroke();
-  }
-  ctx.restore();
-}
-
-function drawClouds(ctx: CanvasRenderingContext2D, clouds: { x: number; y: number; scale: number }[]) {
-  ctx.save();
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
   clouds.forEach((cloud) => {
-    const s = cloud.scale;
-    ctx.beginPath();
-    ctx.ellipse(cloud.x, cloud.y, 34 * s, 18 * s, 0, 0, Math.PI * 2);
-    ctx.ellipse(cloud.x + 30 * s, cloud.y + 4 * s, 26 * s, 15 * s, 0, 0, Math.PI * 2);
-    ctx.ellipse(cloud.x - 28 * s, cloud.y + 6 * s, 24 * s, 14 * s, 0, 0, Math.PI * 2);
-    ctx.fill();
+    const sprite = CLOUD_SPRITES[cloud.sprite % CLOUD_SPRITES.length];
+    if (isReady(sprite)) {
+      const w = 150 * cloud.scale;
+      const h = (sprite.naturalHeight / sprite.naturalWidth) * w;
+      ctx.drawImage(sprite, cloud.x - w / 2, cloud.y - h / 2, w, h);
+    } else {
+      // Soft fallback while the sprite loads
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+      const s = cloud.scale;
+      ctx.beginPath();
+      ctx.ellipse(cloud.x, cloud.y, 34 * s, 18 * s, 0, 0, Math.PI * 2);
+      ctx.ellipse(cloud.x + 30 * s, cloud.y + 4 * s, 26 * s, 15 * s, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
   });
   ctx.restore();
 }
@@ -486,12 +517,20 @@ function drawGround(ctx: CanvasRenderingContext2D, level: LevelData) {
   ctx.save();
   const groundY = level.groundY;
   const groundHeight = 120;
+  // Overdraw well past the world bounds so no sky is ever visible beside or
+  // beneath the terrain, whatever the screen aspect and camera anchor.
+  const bleed = Math.max(level.worldWidth, level.worldHeight);
 
   if (isReady(GROUND_SPRITE)) {
     // Claymation grass-over-dirt texture; slight overlap above groundY so the
     // grass edge reads naturally under planks/the cat resting on the line.
     const topOverlap = 14;
     ctx.drawImage(GROUND_SPRITE, 0, groundY - topOverlap, level.worldWidth, groundHeight + topOverlap);
+    // Extend the dirt tone below and to the sides of the textured strip.
+    ctx.fillStyle = '#B07C42';
+    ctx.fillRect(-bleed, groundY + groundHeight - 2, level.worldWidth + bleed * 2, bleed);
+    ctx.fillRect(-bleed, groundY, bleed, bleed);
+    ctx.fillRect(level.worldWidth, groundY, bleed, bleed);
     ctx.restore();
     return;
   }
@@ -533,23 +572,12 @@ function drawBall(ctx: CanvasRenderingContext2D, ball: Matter.Body) {
 
   if (isReady(sprite)) {
     // Claymation boulder sprite (rotation-safe: a sphere reads correctly from any angle)
-    ctx.beginPath();
-    ctx.arc(2, radius * 0.12, radius, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.14)';
-    ctx.fill();
-
     ctx.drawImage(sprite, -radius, -radius, radius * 2, radius * 2);
     ctx.restore();
     return;
   }
 
   // Fallback while the sprite loads (or if it fails to load)
-  // Ball shadow
-  ctx.beginPath();
-  ctx.arc(2, 4, radius, 0, Math.PI * 2);
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.12)';
-  ctx.fill();
-
   // Dark slate stone/iron ball with crisp border (Design theme `#44474F` with `#1B1B1F`)
   ctx.beginPath();
   ctx.arc(0, 0, radius, 0, Math.PI * 2);
@@ -570,9 +598,29 @@ function drawBall(ctx: CanvasRenderingContext2D, ball: Matter.Body) {
   ctx.restore();
 }
 
-function drawCat(ctx: CanvasRenderingContext2D, catBody: Matter.Body, gameState: GameState) {
+function drawCat(
+  ctx: CanvasRenderingContext2D,
+  catBody: Matter.Body,
+  gameState: GameState,
+  catWidth: number,
+  catHeight: number
+) {
   ctx.save();
   ctx.translate(catBody.position.x, catBody.position.y);
+
+  if (isReady(CAT_SPRITE)) {
+    // Sprite art is drawn a little larger than the hitbox and anchored so its
+    // feet sit on the ground line rather than centred on the box.
+    const drawW = catWidth * 2.1;
+    const drawH = (CAT_SPRITE.naturalHeight / CAT_SPRITE.naturalWidth) * drawW;
+    ctx.drawImage(CAT_SPRITE, -drawW / 2, catHeight / 2 - drawH, drawW, drawH);
+    ctx.restore();
+    return;
+  }
+
+  // The physics hitbox is intentionally smaller than the cat, so the drawing
+  // scale comes from the level config rather than the body's own bounds.
+  ctx.scale(catWidth / 48, catHeight / 48);
 
   const width = 48;
   const height = 48;
@@ -694,17 +742,6 @@ function drawEditablePlank(ctx: CanvasRenderingContext2D, plank: PlacedPlank, is
   ctx.strokeStyle = mat.borderColor;
   ctx.lineWidth = 2.5;
   ctx.stroke();
-
-  // Wood Material Label Pill
-  ctx.fillStyle = mat.badgeBg;
-  ctx.beginPath();
-  ctx.roundRect(-24, -6, 48, 12, 6);
-  ctx.fill();
-  ctx.fillStyle = mat.badgeText;
-  ctx.font = 'bold 9px sans-serif';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(mat.name.toUpperCase(), 0, 0);
 
   // Border selection outline
   if (isSelected) {

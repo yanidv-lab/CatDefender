@@ -5,10 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <title>Cat Defender Physics</title>
     <style>
+      /*
+        Deliberately does NOT reset margin or padding here. This block is
+        unlayered, and unlayered CSS outranks every @layer rule — including all
+        of Tailwind v4's utilities. A universal margin/padding reset here
+        silently kills every spacing utility in the app. Tailwind's own preflight
+        already performs that reset from inside @layer base, where utilities can
+        still override it.
+      */
       * {
-        box-sizing: border-box;
-        margin: 0;
-        padding: 0;
         -moz-user-select: none;
              user-select: none;
         -webkit-user-select: none;
@@ -18,13 +23,13 @@
         width: 100%;
         height: 100%;
         overflow: hidden;
-        background-color: #0F172A;
+        background-color: #5FADD9;
         font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
         color: #F8FAFC;
       }
     </style>
-    <script type="module" crossorigin src="./assets/index-BQ87EUDl.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-BbHEtxOI.css">
+    <script type="module" crossorigin src="./assets/index-DRcr3_2r.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-CdQlzMDJ.css">
   </head>
   <body>
     <div id="root"></div>
