@@ -15,6 +15,10 @@ export const PIXELS_PER_METER = 55;
  * on-screen size throughout. Taller levels simply extend upward out of view,
  * and the boulder falls into frame — the barometer reports how far up it is.
  */
+// Narrow on purpose. A two-plank A-frame splays its feet under load in this
+// engine; a snug world lets the frame brace against the side walls, which is
+// what makes a free-standing shelter hold at all — and it keeps the cat large
+// on screen.
 export const WORLD_WIDTH_NARROW = 420;
 export const WORLD_WIDTH_WIDE = 520;
 

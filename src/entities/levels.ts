@@ -105,9 +105,9 @@ const LEVEL_SPECS: LevelSpec[] = [
   {
     title: 'Iron From Above',
     description: 'Iron, from thirty-two metres. The hardest single impact yet.',
-    dropHeightMeters: 34,
+    dropHeightMeters: 32,
     reward: 470,
-    boulders: [{ material: 'iron', radius: 38, density: 0.017, offsetX: 0 }],
+    boulders: [{ material: 'iron', radius: 35, density: 0.013, offsetX: 0 }],
     hint: 'Keep the frame tight. A wide, shallow roof folds under this much energy.',
   },
   {
@@ -212,7 +212,15 @@ export const GAME_LEVELS: LevelData[] = LEVEL_SPECS.map((spec, index) => {
         dropDelayMs: b.dropDelayMs ?? 0,
       };
     }),
-    defaultPlankWidth: 165,
+    // Long relative to the cat on purpose. Any contact with the cat is a loss,
+    // so the shelter has to clear it with room to spare even as it deforms under
+    // impact; a frame only slightly wider than the cat inevitably grazed it.
+    // Long relative to the cat on purpose: any contact is a loss, so the frame
+    // must clear it with room to spare even while deforming under impact. A
+    // shorter 185 frame could not carry a cap beam without its feet splaying.
+    // The world is sized to match so a plank can still be parked clear of both
+    // the cat and the side walls.
+    defaultPlankWidth: 215,
     defaultPlankHeight: 18,
     hints: [spec.hint],
   };

@@ -438,42 +438,49 @@ export class PhysicsEngine {
               this.callbacks.onCatImpact(impactForce);
             }
 
-            if (otherBody.label === 'ball') {
-              // A boulder reaching the cat is always a loss, however gently it
-              // arrives — stopping it is the entire object of the game.
-              this.triggerCatHurt('ball');
-            } else {
-              // Wood counts as a hit once it carries any real force behind it.
-              // A literal any-contact rule made every level unwinnable: a
-              // shelter deforms under load, and the timber that just saved the
-              // cat inevitably grazes it on the way. This threshold is a small
-              // fraction of the cat's budget, so a resting plank is survivable
-              // while a plank driven into the cat is not.
-              // Floored, not purely proportional: scaling it off the level's
-              // tolerance made the gentlest early levels the strictest in
-              // absolute terms, so levels 1 and 2 failed while harder ones passed.
-              const graze = Math.max(16, (this.currentLevel?.cat.maxDamageForce || 30) * 0.25);
-              if (impactForce >= graze) {
-                this.triggerCatHurt(otherBody.label as 'plank' | 'fragment');
-              }
-            }
+            // Anything reaching the cat is a loss — boulder, plank or splinter.
+            // Protecting the cat completely is the whole point of the game, so
+            // there is no allowance for a "light" hit. The shelter is built long
+            // enough to clear the cat with room to spare, which is what makes
+            // this rule playable rather than arbitrary.
+            this.triggerCatHurt(otherBody.label as 'ball' | 'plank' | 'fragment');
           }
         }
 
         if (speed < 0.5) return; // Ignore minor sliding contacts for plank wear
 
         // --- PLANK BREAKABLE SYSTEM ---
-        this.handlePlankImpact(bodyA, impactForce);
-        this.handlePlankImpact(bodyB, impactForce);
+        // Each plank is told what hit it, so damage can be attributed properly.
+        this.handlePlankImpact(bodyA, impactForce, bodyB.label);
+        this.handlePlankImpact(bodyB, impactForce, bodyA.label);
       });
     });
   }
 
-  private handlePlankImpact(body: Matter.Body, force: number) {
+  private handlePlankImpact(body: Matter.Body, force: number, hitByLabel: string) {
     if (body.label !== 'plank' || !body.customData) return;
 
     const data = body.customData;
     if (data.isBroken || !data.plankId) return;
+
+    // Damage is attributed to what actually struck the plank. Previously every
+    // collision pair damaged both bodies indiscriminately, so a plank shattered
+    // from landing on the ground or from resting against its neighbour — planks
+    // broke with no visible connection to the boulder that was supposed to break
+    // them. Only the boulder does real damage now; timber grinding against
+    // timber wears slowly, and the ground and the cat do none at all.
+    let severity: number;
+    switch (hitByLabel) {
+      case 'ball':
+        severity = 1;
+        break;
+      case 'plank':
+      case 'fragment':
+        severity = 0.12;
+        break;
+      default:
+        return; // ground, walls and the cat never break a plank
+    }
 
     const forceThreshold = 1.5; // minimum force to cause damage
     if (force < forceThreshold) return;
@@ -484,7 +491,7 @@ export class PhysicsEngine {
     // that dealt 600-1500 damage, which shattered pine and ironwood alike on
     // first contact and made material choice irrelevant. At 1.2x, oak (110 HP)
     // gives way around 90 N while ironwood (200 HP) holds until about 170 N.
-    const damage = (force - forceThreshold) * 1.2;
+    const damage = (force - forceThreshold) * 1.2 * severity;
     const newHealth = Math.max(0, currentHealth - damage);
     data.health = newHealth;
 
