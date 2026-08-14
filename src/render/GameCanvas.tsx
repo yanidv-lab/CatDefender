@@ -608,7 +608,7 @@ function drawCat(
   if (isReady(CAT_SPRITE)) {
     // Sprite art is drawn a little larger than the hitbox and anchored so its
     // feet sit on the ground line rather than centred on the box.
-    const drawW = catWidth * 2.1;
+    const drawW = catWidth * 1.55;
     const drawH = (CAT_SPRITE.naturalHeight / CAT_SPRITE.naturalWidth) * drawW;
     ctx.drawImage(CAT_SPRITE, -drawW / 2, catHeight / 2 - drawH, drawW, drawH);
     ctx.restore();

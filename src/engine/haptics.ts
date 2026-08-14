@@ -12,7 +12,18 @@ const PATTERNS: Record<HapticEvent, number | number[]> = {
   cat_win: [0, 20, 60, 20, 60, 40],
 };
 
+let hapticsEnabled = true;
+
+export function setHapticsEnabled(enabled: boolean) {
+  hapticsEnabled = enabled;
+}
+
+export function isHapticsEnabled() {
+  return hapticsEnabled;
+}
+
 export function triggerHaptic(event: HapticEvent) {
+  if (!hapticsEnabled) return;
   if (typeof navigator === 'undefined' || typeof navigator.vibrate !== 'function') return;
   try {
     navigator.vibrate(PATTERNS[event]);

@@ -99,7 +99,7 @@ const LEVEL_SPECS: LevelSpec[] = [
     description: 'Solid iron. Twice the mass of stone at the same size.',
     dropHeightMeters: 28,
     reward: 380,
-    boulders: [{ material: 'iron', radius: 36, density: 0.015, offsetX: 0 }],
+    boulders: [{ material: 'iron', radius: 34, density: 0.011, offsetX: 0 }],
     hint: 'Iron needs ironwood. Two strong planks beat four weak ones.',
   },
   {
@@ -127,31 +127,33 @@ const LEVEL_SPECS: LevelSpec[] = [
     dropHeightMeters: 32,
     reward: 1100,
     boulders: [
-      { material: 'stone', radius: 30, density: 0.007, offsetX: -52 },
-      { material: 'iron', radius: 36, density: 0.014, offsetX: 0, extraMeters: 2, dropDelayMs: 550 },
+      { material: 'stone', radius: 29, density: 0.006, offsetX: -34 },
+      { material: 'iron', radius: 33, density: 0.010, offsetX: 0, extraMeters: 2, dropDelayMs: 550 },
     ],
     hint: 'Cover the centre first. The flanks glance off a well-angled roof.',
   },
   {
     title: 'Avalanche',
-    description: 'Three boulders across a wide spread.',
+    description: 'A wide pair, far apart. Neither flank can be left open.',
     dropHeightMeters: 30,
     reward: 1500,
+    // Reduced from three boulders to two. With three, one always reached the cat
+    // around a displaced shelter, and since any boulder touching the cat is a
+    // loss, no build of any material or size could clear it.
     boulders: [
-      { material: 'stone', radius: 30, density: 0.007, offsetX: -62 },
-      { material: 'iron', radius: 34, density: 0.011, offsetX: 0, extraMeters: 2, dropDelayMs: 500 },
-      { material: 'stone', radius: 30, density: 0.007, offsetX: 62, extraMeters: 4, dropDelayMs: 1000 },
+      { material: 'stone', radius: 27, density: 0.005, offsetX: -34 },
+      { material: 'iron', radius: 30, density: 0.008, offsetX: 34, extraMeters: 3, dropDelayMs: 900 },
     ],
-    hint: 'Go wider than feels necessary. The outer stones find any exposed flank.',
+    hint: 'Go wider than feels necessary. An open flank is all they need.',
   },
   {
     title: 'Terminal Velocity',
     description: 'Two iron spheres from forty-two metres. Everything you have learned.',
-    dropHeightMeters: 42,
+    dropHeightMeters: 38,
     reward: 1900,
     boulders: [
-      { material: 'iron', radius: 34, density: 0.012, offsetX: -35 },
-      { material: 'iron', radius: 34, density: 0.012, offsetX: 35, extraMeters: 5, dropDelayMs: 900 },
+      { material: 'iron', radius: 31, density: 0.009, offsetX: -30 },
+      { material: 'iron', radius: 31, density: 0.009, offsetX: 30, extraMeters: 4, dropDelayMs: 1100 },
     ],
     hint: 'Ironwood only. Anything lighter is kindling at this speed.',
   },
@@ -165,7 +167,14 @@ export const GAME_LEVELS: LevelData[] = LEVEL_SPECS.map((spec, index) => {
   // Constant across levels so the camera scale never changes between them.
   const worldWidth = spec.boulders.length > 2 ? WORLD_WIDTH_WIDE : WORLD_WIDTH_NARROW;
   const catX = worldWidth / 2;
-  const catSize = 60;
+  // Hitbox dimensions, matched to how large the cat is actually drawn so that
+  // anything visibly striking it also strikes it in physics.
+  // Kept deliberately compact: an A-frame of two planks peaks a little over
+  // 110px, so a taller cat leaves no clearance and the boulder drives the frame
+  // straight onto it. This size covers the drawn cat's body while leaving room
+  // to actually build something over it.
+  const catWidth = 56;
+  const catHeight = 70;
 
   return {
     id: index + 1,
@@ -179,9 +188,9 @@ export const GAME_LEVELS: LevelData[] = LEVEL_SPECS.map((spec, index) => {
     cat: {
       id: 'cat_1',
       x: catX,
-      y: groundY - catSize / 2,
-      width: catSize,
-      height: catSize,
+      y: groundY - catHeight / 2,
+      width: catWidth,
+      height: catHeight,
       maxDamageForce: deriveCatTolerance(spec),
     },
     balls: spec.boulders.map((b, i) => {
@@ -199,7 +208,7 @@ export const GAME_LEVELS: LevelData[] = LEVEL_SPECS.map((spec, index) => {
         dropDelayMs: b.dropDelayMs ?? 0,
       };
     }),
-    defaultPlankWidth: 145,
+    defaultPlankWidth: 165,
     defaultPlankHeight: 18,
     hints: [spec.hint],
   };

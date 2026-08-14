@@ -23,7 +23,7 @@ export const WOOD_MATERIALS: Record<WoodType, WoodMaterialConfig> = {
     name: 'Pine',
     description: 'Lightweight and brittle',
     density: 0.0015,
-    maxHealth: 65,
+    maxHealth: 70,
     price: 60,
     color: '#D7CCC8',
     borderColor: '#8D6E63',
@@ -36,7 +36,7 @@ export const WOOD_MATERIALS: Record<WoodType, WoodMaterialConfig> = {
     name: 'Oak',
     description: 'Balanced and sturdy',
     density: 0.0035,
-    maxHealth: 110,
+    maxHealth: 150,
     price: 100,
     color: '#795548',
     borderColor: '#3E2723',
@@ -49,7 +49,10 @@ export const WOOD_MATERIALS: Record<WoodType, WoodMaterialConfig> = {
     name: 'Ironwood',
     description: 'Heavy and ultra-tough',
     density: 0.008,
-    maxHealth: 200,
+    // Late levels land repeated ~140 N blows; at 200 HP even ironwood shattered
+    // on the second hit, so no material could clear them and the "ironwood only"
+    // hints were unachievable. This gives the top tier genuine staying power.
+    maxHealth: 340,
     price: 250,
     color: '#3E2723',
     borderColor: '#1B1B1F',

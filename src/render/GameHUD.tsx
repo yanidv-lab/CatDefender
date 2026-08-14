@@ -15,6 +15,8 @@ import {
   Check,
   Ruler,
   Weight,
+  Home,
+  Coins as CoinsIcon,
 } from 'lucide-react';
 import { GameState, PlacedPlank } from '../engine/physicsEngine';
 import { LevelData, SimulationStats, WoodType, WOOD_MATERIALS } from '../entities/types';
@@ -48,6 +50,7 @@ interface GameHUDProps {
   onReplay: () => void;
   onNextLevel: () => void;
   onRestartRun: () => void;
+  onOpenMenu: () => void;
 }
 
 export const GameHUD: React.FC<GameHUDProps> = ({
@@ -69,6 +72,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   onReplay,
   onNextLevel,
   onRestartRun,
+  onOpenMenu,
 }) => {
   const [isSoundOn, setIsSoundOn] = useState(true);
   const [showHintModal, setShowHintModal] = useState(false);
@@ -92,6 +96,12 @@ export const GameHUD: React.FC<GameHUDProps> = ({
 
   // Heaviest boulder in the level, shown as a readable weight. Matter.js mass is
   // density x area in engine units, scaled here purely for presentation.
+  // A level can be entered with too little coin to buy even the cheapest plank.
+  // START needs at least one plank, so without an escape hatch that state is a
+  // dead end: nothing to place, nothing to press, no way to lose and retry.
+  const cheapestPlank = Math.min(...WOOD_ORDER.map(plankPrice));
+  const isBankrupt = isEditing && placedPlanks.length === 0 && points < cheapestPlank;
+
   const boulderMassKg = Math.round(
     Math.max(...currentLevel.balls.map((b) => b.density * Math.PI * b.radius * b.radius)) * 10
   );
@@ -116,6 +126,16 @@ export const GameHUD: React.FC<GameHUDProps> = ({
         </div>
 
         <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            onClick={() => {
+              playClick();
+              onOpenMenu();
+            }}
+            className="pointer-events-auto w-10 h-10 flex items-center justify-center rounded-full bg-black/35 backdrop-blur-md active:scale-95 transition shadow-lg"
+            aria-label="Main menu"
+          >
+            <Home className="w-5 h-5" />
+          </button>
           <button
             onClick={() => {
               playClick();
@@ -323,6 +343,32 @@ export const GameHUD: React.FC<GameHUDProps> = ({
           )
         )}
       </div>
+
+      {/* --- OUT OF COINS RESCUE --- */}
+      {isBankrupt && (
+        <div className="absolute inset-0 z-40 flex items-center justify-center p-6 bg-[#00243D]/70 backdrop-blur-sm pointer-events-auto">
+          <div className="bg-[#0E3556] border border-white/15 rounded-3xl p-6 max-w-[330px] w-full shadow-2xl text-center space-y-4">
+            <div className="w-16 h-16 mx-auto rounded-full bg-[#FFB300]/20 border-2 border-[#FFB300]/40 flex items-center justify-center text-[#FFB300]">
+              <CoinsIcon className="w-8 h-8" />
+            </div>
+            <div>
+              <h2 className="text-xl font-extrabold">OUT OF COINS</h2>
+              <p className="text-sm text-white/60 mt-1">
+                Not enough left to buy a plank. Start a fresh run to try again.
+              </p>
+            </div>
+            <button
+              onClick={() => {
+                playClick();
+                onRestartRun();
+              }}
+              className="w-full h-12 rounded-2xl bg-[#005AC1] hover:bg-[#004395] font-bold transition active:scale-[0.98] shadow-lg flex items-center justify-center gap-2"
+            >
+              <RotateCcw className="w-4 h-4" /> New run
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* --- HINT MODAL --- */}
       {showHintModal && (

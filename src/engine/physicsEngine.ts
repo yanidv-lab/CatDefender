@@ -48,6 +48,14 @@ export class PhysicsEngine {
   private maxCatImpactForce: number = 0;
   private catHurt: boolean = false;
   private simulationStartTime: number = 0;
+  /**
+   * Seed for the deterministic scatter applied to plank fragments. Fragments
+   * used to take Math.random() velocities, and because they go on to collide
+   * with the boulder and the rest of the shelter, an identical build could win
+   * one run and lose the next. Re-seeding per simulation makes a given build
+   * always play out the same way — fair for the player, and measurable.
+   */
+  private rngState: number = 1;
   private activeAnimationFrame: number | null = null;
 
   constructor(callbacks: PhysicsEngineCallbacks) {
@@ -76,6 +84,7 @@ export class PhysicsEngine {
     this.catHurt = false;
     this.maxImpactForce = 0;
     this.maxCatImpactForce = 0;
+    this.rngState = 0x9e3779b9 ^ level.id;
     this.placedPlanks = [...userPlanks];
     this.plankDamageStates.clear();
     this.fragmentBodies = [];
@@ -116,16 +125,15 @@ export class PhysicsEngine {
 
     Matter.World.add(this.world, [this.groundBody, this.leftWallBody, this.rightWallBody]);
 
-    // 2. Create Cat Hitbox.
-    // Deliberately smaller than the drawn cat: a shelter's legs naturally come
-    // to rest right beside the cat, and a full-size box would count that
-    // harmless brush as a killing blow. Only the cat's core counts as a hit.
-    const HITBOX_SCALE = 0.55;
+    // 2. Create Cat Hitbox, matching the drawn cat's footprint. It used to be
+    // scaled to 55% to stop shelter legs grazing it, but the sprite is drawn far
+    // larger than that, so boulders visibly crushed the cat while missing the
+    // box entirely. Grazing is now handled by the force threshold instead.
     this.catBody = Matter.Bodies.rectangle(
       level.cat.x,
       level.cat.y,
-      level.cat.width * HITBOX_SCALE,
-      level.cat.height * HITBOX_SCALE,
+      level.cat.width,
+      level.cat.height,
       {
         isStatic: true, // Cat sits firmly on ground
         friction: 0.9,
@@ -365,6 +373,15 @@ export class PhysicsEngine {
     return Math.max(0, pixelsToMeters(lowestAltitude));
   }
 
+  /** Deterministic [0,1) PRNG (mulberry32), reseeded at each level start. */
+  private nextRandom(): number {
+    this.rngState = (this.rngState + 0x6d2b79f5) | 0;
+    let t = this.rngState;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+
   private setupCollisionEvents() {
     Matter.Events.on(this.engine, 'collisionStart', (event) => {
       if (this.gameState !== 'SIMULATING') return;
@@ -381,8 +398,6 @@ export class PhysicsEngine {
         const speedSq = relVelX * relVelX + relVelY * relVelY;
         const speed = Math.sqrt(speedSq);
 
-        if (speed < 0.5) return; // Ignore minor sliding contacts
-
         const massA = bodyA.isStatic ? 10 : bodyA.mass;
         const massB = bodyB.isStatic ? 10 : bodyB.mass;
         const reducedMass = (massA * massB) / (massA + massB);
@@ -398,22 +413,34 @@ export class PhysicsEngine {
         }
 
         // --- CAT HITBOX COLLISION ---
+        // Evaluated before the slow-contact filter below: a boulder settling
+        // onto the cat arrives slowly but is still lethal, and skipping it was
+        // why many visible hits never registered as a loss.
         if (bodyA.label === 'cat' || bodyB.label === 'cat') {
           const otherBody = bodyA.label === 'cat' ? bodyB : bodyA;
-          // Ignore ground touching cat
           if (otherBody.label !== 'ground' && otherBody.label !== 'wall') {
-            const catThreshold = this.currentLevel?.cat.maxDamageForce || 8.0;
             if (impactForce > this.maxCatImpactForce) {
               this.maxCatImpactForce = Math.round(impactForce * 10) / 10;
             }
             if (impactForce > 0.8) {
               this.callbacks.onCatImpact(impactForce);
             }
-            if (impactForce >= catThreshold) {
+
+            if (otherBody.label === 'ball') {
+              // A boulder reaching the cat at all means the shelter failed —
+              // that is the entire object of the game, so it is not a question
+              // of how hard it landed.
               this.triggerCatHurt();
+            } else {
+              // Planks and debris only count above the level's force budget, so
+              // a shelter leg coming to rest against the cat stays harmless.
+              const catThreshold = this.currentLevel?.cat.maxDamageForce || 8.0;
+              if (impactForce >= catThreshold) this.triggerCatHurt();
             }
           }
         }
+
+        if (speed < 0.5) return; // Ignore minor sliding contacts for plank wear
 
         // --- PLANK BREAKABLE SYSTEM ---
         this.handlePlankImpact(bodyA, impactForce);
@@ -522,14 +549,14 @@ export class PhysicsEngine {
 
     // Inherit motion + outward scatter impulse
     Matter.Body.setVelocity(frag1, {
-      x: vel.x - cosA * 0.5 + (Math.random() - 0.5),
-      y: vel.y - sinA * 0.5 + (Math.random() - 0.5),
+      x: vel.x - cosA * 0.5 + (this.nextRandom() - 0.5),
+      y: vel.y - sinA * 0.5 + (this.nextRandom() - 0.5),
     });
     Matter.Body.setAngularVelocity(frag1, angVel - 0.05);
 
     Matter.Body.setVelocity(frag2, {
-      x: vel.x + cosA * 0.5 + (Math.random() - 0.5),
-      y: vel.y + sinA * 0.5 + (Math.random() - 0.5),
+      x: vel.x + cosA * 0.5 + (this.nextRandom() - 0.5),
+      y: vel.y + sinA * 0.5 + (this.nextRandom() - 0.5),
     });
     Matter.Body.setAngularVelocity(frag2, angVel + 0.05);
 
@@ -574,14 +601,31 @@ export class PhysicsEngine {
       }
     });
 
-    // Timeout safety win check after 7 seconds if cat unharmed
     if (allBallsSettled || elapsedMs > 7500) {
-      if (!this.catHurt) {
-        this.gameState = 'WON';
-        this.callbacks.onGameStateChange('WON');
-        this.callbacks.onSoundTrigger?.('cat_win');
+      // A boulder can come to rest overlapping the cat without ever firing a
+      // fresh collision event. Settling was previously enough to declare a win,
+      // so the cat could be pinned under a boulder and still be "protected".
+      if (this.isBoulderTouchingCat()) {
+        this.triggerCatHurt();
+        return;
+      }
+      this.gameState = 'WON';
+      this.callbacks.onGameStateChange('WON');
+      this.callbacks.onSoundTrigger?.('cat_win');
+    }
+  }
+
+  /** True when any boulder is overlapping the cat's hitbox right now. */
+  private isBoulderTouchingCat(): boolean {
+    if (!this.catBody) return false;
+    const c = this.catBody.bounds;
+    for (const ball of this.ballBodies.values()) {
+      const b = ball.bounds;
+      if (b.min.x < c.max.x && b.max.x > c.min.x && b.min.y < c.max.y && b.max.y > c.min.y) {
+        return true;
       }
     }
+    return false;
   }
 
   private cleanupOffscreenBodies() {

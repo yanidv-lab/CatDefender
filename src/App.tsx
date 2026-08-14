@@ -6,7 +6,8 @@ import { GameHUD } from './render/GameHUD';
 import { LevelData, SimulationStats, WoodType } from './entities/types';
 import { STARTING_POINTS, calculateLevelScore, plankPrice } from './entities/economy';
 import { soundManager, SoundType } from './engine/soundEffects';
-import { triggerHaptic } from './engine/haptics';
+import { triggerHaptic, setHapticsEnabled } from './engine/haptics';
+import { MainMenu, MenuScreen } from './render/MainMenu';
 
 const EMPTY_STATS: SimulationStats = {
   maxImpactForce: 0,
@@ -36,6 +37,29 @@ export const App: React.FC = () => {
     }
   }, [points]);
 
+  // 'MENU' covers the menu/scores/options screens; 'GAME' is the playfield.
+  const [screen, setScreen] = useState<'MENU' | 'GAME'>('MENU');
+  const [menuScreen, setMenuScreen] = useState<MenuScreen>('MENU');
+  const [hasRun, setHasRun] = useState(false);
+  const [soundOn, setSoundOn] = useState(true);
+  const [hapticsOn, setHapticsOn] = useState(true);
+
+  const [bestPoints, setBestPoints] = useState<number>(() => {
+    try {
+      return Math.max(0, parseInt(localStorage.getItem('cat_defender_best_points') || '0', 10));
+    } catch {
+      return 0;
+    }
+  });
+
+  const [levelsCleared, setLevelsCleared] = useState<number>(() => {
+    try {
+      return Math.max(0, parseInt(localStorage.getItem('cat_defender_levels_cleared') || '0', 10));
+    } catch {
+      return 0;
+    }
+  });
+
   const [bestLevel, setBestLevel] = useState<number>(() => {
     try {
       const saved = localStorage.getItem('cat_defender_best_level');
@@ -52,6 +76,15 @@ export const App: React.FC = () => {
       // ignore storage access errors
     }
   }, [bestLevel]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('cat_defender_best_points', bestPoints.toString());
+      localStorage.setItem('cat_defender_levels_cleared', levelsCleared.toString());
+    } catch {
+      // ignore storage access errors
+    }
+  }, [bestPoints, levelsCleared]);
 
   const [currentLevelId, setCurrentLevelId] = useState<number>(1);
   const currentLevel: LevelData = useMemo(() => {
@@ -131,6 +164,8 @@ export const App: React.FC = () => {
   );
 
   useEffect(() => {
+    // Load level 1 so the menu has a live sky behind it; the run itself only
+    // begins when the player picks New Game.
     loadLevel(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -140,8 +175,13 @@ export const App: React.FC = () => {
     if (gameState === 'WON') {
       const score = calculateLevelScore(currentLevel.reward, placedPlanks.length);
       setLastRunScore(score);
-      setPoints((p) => p + score);
+      setPoints((p) => {
+        const next = p + score;
+        setBestPoints((bp) => Math.max(bp, next));
+        return next;
+      });
       setBestLevel((b) => Math.max(b, currentLevel.id + 1));
+      setLevelsCleared((c) => c + 1);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gameState]);
@@ -244,8 +284,42 @@ export const App: React.FC = () => {
     loadLevel(nextId <= GAME_LEVELS.length ? nextId : 1);
   };
 
-  /** Failing the run resets progress to level 1. */
-  const handleRestartRun = () => loadLevel(1);
+  /**
+   * A run reset restores the starting coin stake as well as the level. Without
+   * the coins the player could return to level 1 with an empty purse, unable to
+   * buy a plank and unable to press START, which is a dead end with no way out.
+   */
+  const handleRestartRun = () => {
+    setPoints(STARTING_POINTS);
+    loadLevel(1);
+    setHasRun(true);
+  };
+
+  const handleNewGame = () => {
+    handleRestartRun();
+    setScreen('GAME');
+  };
+
+  const toggleSound = () => {
+    const next = !soundOn;
+    setSoundOn(next);
+    soundManager.setEnabled(next);
+  };
+
+  const toggleHaptics = () => {
+    const next = !hapticsOn;
+    setHapticsOn(next);
+    setHapticsEnabled(next);
+  };
+
+  const handleResetProgress = () => {
+    setBestLevel(1);
+    setBestPoints(0);
+    setLevelsCleared(0);
+    setHasRun(false);
+    setPoints(STARTING_POINTS);
+    loadLevel(1);
+  };
 
   const handleResetCamera = () => fitCameraToLevel(currentLevel);
 
@@ -257,6 +331,7 @@ export const App: React.FC = () => {
       loadLevel,
       setPlanks: (planks: PlacedPlank[]) => syncPlanks(planks),
       start: () => physicsEngineRef.current?.startDropSimulation(),
+      setPoints: (n: number) => setPoints(n),
       state: () => ({ gameState, stats: simulationStats, points, planks: placedPlanks.length }),
     };
   }
@@ -281,7 +356,8 @@ export const App: React.FC = () => {
         />
       )}
 
-      <GameHUD
+      {screen === 'GAME' && (
+        <GameHUD
         currentLevel={currentLevel}
         totalLevels={GAME_LEVELS.length}
         bestLevel={bestLevel}
@@ -301,7 +377,33 @@ export const App: React.FC = () => {
         onReplay={handleReplay}
         onNextLevel={handleNextLevel}
         onRestartRun={handleRestartRun}
-      />
+        onOpenMenu={() => {
+          setMenuScreen('MENU');
+          setScreen('MENU');
+        }}
+        />
+      )}
+
+      {screen === 'MENU' && (
+        <MainMenu
+          screen={menuScreen}
+          stats={{
+            bestLevel,
+            bestPoints,
+            levelsCleared,
+            totalLevels: GAME_LEVELS.length,
+          }}
+          hasRunInProgress={hasRun}
+          soundOn={soundOn}
+          hapticsOn={hapticsOn}
+          onNavigate={setMenuScreen}
+          onNewGame={handleNewGame}
+          onContinue={() => setScreen('GAME')}
+          onToggleSound={toggleSound}
+          onToggleHaptics={toggleHaptics}
+          onResetProgress={handleResetProgress}
+        />
+      )}
     </div>
   );
 };
