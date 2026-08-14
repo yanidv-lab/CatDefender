@@ -47,6 +47,7 @@ export class PhysicsEngine {
   private maxImpactForce: number = 0;
   private maxCatImpactForce: number = 0;
   private catHurt: boolean = false;
+  private catHurtCause: '' | 'ball' | 'plank' | 'fragment' = '';
   private simulationStartTime: number = 0;
   /**
    * Seed for the deterministic scatter applied to plank fragments. Fragments
@@ -84,6 +85,7 @@ export class PhysicsEngine {
     this.catHurt = false;
     this.maxImpactForce = 0;
     this.maxCatImpactForce = 0;
+    this.catHurtCause = '';
     this.rngState = 0x9e3779b9 ^ level.id;
     this.placedPlanks = [...userPlanks];
     this.plankDamageStates.clear();
@@ -101,8 +103,12 @@ export class PhysicsEngine {
       groundHeight,
       {
         isStatic: true,
-        friction: 0.8,
-        restitution: 0.2,
+        // A 45-degree A-frame only holds when static friction exceeds about 1.0.
+        // At the previous values the feet sat exactly on that boundary and crept
+        // outward until the frame pancaked onto the cat under its own weight.
+        friction: 1.2,
+        frictionStatic: 4.0,
+        restitution: 0.0,
         label: 'ground',
       }
     );
@@ -186,8 +192,12 @@ export class PhysicsEngine {
           isStatic: true,
           angle: p.angle,
           density: mat.density,
-          friction: 0.6,
-          restitution: 0.15,
+          // Timber against timber grips hard and barely rebounds. With the old
+          // slick, springy values a free-standing A-frame slid its own feet out
+          // and collapsed under gravity alone, before any boulder arrived.
+          friction: 1.0,
+          frictionStatic: 4.0,
+          restitution: 0.0,
           label: 'plank',
         }
       );
@@ -263,8 +273,9 @@ export class PhysicsEngine {
       isStatic: true,
       angle: p.angle,
       density: mat.density,
-      friction: 0.6,
-      restitution: 0.15,
+      friction: 1.0,
+      frictionStatic: 4.0,
+      restitution: 0.0,
       label: 'plank',
     });
 
@@ -351,6 +362,7 @@ export class PhysicsEngine {
       planksBrokenCount: brokenCount,
       timeElapsedSeconds: Math.round(elapsedSeconds * 10) / 10,
       ballAltitudeMeters: this.getLeadingBallAltitudeMeters(),
+      catHurtCause: this.catHurtCause,
     });
 
     this.activeAnimationFrame = requestAnimationFrame(this.runLoop);
@@ -427,15 +439,23 @@ export class PhysicsEngine {
             }
 
             if (otherBody.label === 'ball') {
-              // A boulder reaching the cat at all means the shelter failed —
-              // that is the entire object of the game, so it is not a question
-              // of how hard it landed.
-              this.triggerCatHurt();
+              // A boulder reaching the cat is always a loss, however gently it
+              // arrives — stopping it is the entire object of the game.
+              this.triggerCatHurt('ball');
             } else {
-              // Planks and debris only count above the level's force budget, so
-              // a shelter leg coming to rest against the cat stays harmless.
-              const catThreshold = this.currentLevel?.cat.maxDamageForce || 8.0;
-              if (impactForce >= catThreshold) this.triggerCatHurt();
+              // Wood counts as a hit once it carries any real force behind it.
+              // A literal any-contact rule made every level unwinnable: a
+              // shelter deforms under load, and the timber that just saved the
+              // cat inevitably grazes it on the way. This threshold is a small
+              // fraction of the cat's budget, so a resting plank is survivable
+              // while a plank driven into the cat is not.
+              // Floored, not purely proportional: scaling it off the level's
+              // tolerance made the gentlest early levels the strictest in
+              // absolute terms, so levels 1 and 2 failed while harder ones passed.
+              const graze = Math.max(16, (this.currentLevel?.cat.maxDamageForce || 30) * 0.25);
+              if (impactForce >= graze) {
+                this.triggerCatHurt(otherBody.label as 'plank' | 'fragment');
+              }
             }
           }
         }
@@ -571,9 +591,10 @@ export class PhysicsEngine {
     Matter.World.add(this.world, [frag1, frag2]);
   }
 
-  private triggerCatHurt() {
+  private triggerCatHurt(cause: 'ball' | 'plank' | 'fragment' = 'ball') {
     if (this.catHurt || this.gameState !== 'SIMULATING') return;
     this.catHurt = true;
+    this.catHurtCause = cause;
     this.gameState = 'FAILED';
     this.callbacks.onGameStateChange('FAILED');
     this.callbacks.onSoundTrigger?.('cat_hurt');

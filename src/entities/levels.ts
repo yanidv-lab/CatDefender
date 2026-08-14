@@ -173,8 +173,12 @@ export const GAME_LEVELS: LevelData[] = LEVEL_SPECS.map((spec, index) => {
   // 110px, so a taller cat leaves no clearance and the boulder drives the frame
   // straight onto it. This size covers the drawn cat's body while leaving room
   // to actually build something over it.
-  const catWidth = 56;
-  const catHeight = 70;
+  // Sized so a shelter can physically clear it. Any contact with the cat is a
+  // loss, and a 45-degree A-frame leg passes only ~46px from centre at cat-top
+  // height — with a 56x70 cat that grazed on contact, failing every level the
+  // instant gravity came on. At 44x54 the same frame clears with real margin.
+  const catWidth = 44;
+  const catHeight = 54;
 
   return {
     id: index + 1,

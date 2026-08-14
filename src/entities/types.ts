@@ -145,4 +145,6 @@ export interface SimulationStats {
   timeElapsedSeconds: number;
   /** Altitude of the lowest still-falling boulder, in metres above the ground. */
   ballAltitudeMeters: number;
+  /** What reached the cat, for the failure screen. Empty while unharmed. */
+  catHurtCause: '' | 'ball' | 'plank' | 'fragment';
 }

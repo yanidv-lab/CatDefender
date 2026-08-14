@@ -16,6 +16,7 @@ const EMPTY_STATS: SimulationStats = {
   planksBrokenCount: 0,
   timeElapsedSeconds: 0,
   ballAltitudeMeters: 0,
+  catHurtCause: '',
 };
 
 export const App: React.FC = () => {
@@ -332,6 +333,15 @@ export const App: React.FC = () => {
       setPlanks: (planks: PlacedPlank[]) => syncPlanks(planks),
       start: () => physicsEngineRef.current?.startDropSimulation(),
       setPoints: (n: number) => setPoints(n),
+      bodies: () => {
+        const b = physicsEngineRef.current?.getPhysicsBodies();
+        if (!b) return null;
+        return {
+          cat: b.catBody ? { x: b.catBody.position.x, y: b.catBody.position.y, bounds: b.catBody.bounds } : null,
+          planks: b.plankBodies.map((p: any) => ({ x: +p.position.x.toFixed(1), y: +p.position.y.toFixed(1), a: +(p.angle*180/Math.PI).toFixed(1) })),
+          balls: b.ballBodies.map((p: any) => ({ x: +p.position.x.toFixed(1), y: +p.position.y.toFixed(1) })),
+        };
+      },
       state: () => ({ gameState, stats: simulationStats, points, planks: placedPlanks.length }),
     };
   }

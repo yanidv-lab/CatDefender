@@ -71,6 +71,38 @@ function fillPlankTexture(ctx: CanvasRenderingContext2D, woodType: WoodType, w: 
   }
 }
 
+/**
+ * True when a plank at this transform would overlap the cat. Since any contact
+ * with the cat is a loss, letting the player park a plank inside it would be an
+ * instant, unavoidable failure the moment they pressed START — so placement is
+ * blocked there instead. Uses the plank's four corners plus its centre, with a
+ * small margin, which is ample for a thin rectangle against a box.
+ */
+function overlapsCat(
+  x: number,
+  y: number,
+  angle: number,
+  w: number,
+  h: number,
+  cat: { x: number; y: number; width: number; height: number }
+): boolean {
+  const margin = 4;
+  const halfW = cat.width / 2 + margin;
+  const halfH = cat.height / 2 + margin;
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  const pts: [number, number][] = [
+    [0, 0],
+    [-w / 2, -h / 2], [w / 2, -h / 2], [-w / 2, h / 2], [w / 2, h / 2],
+    [-w / 4, 0], [w / 4, 0],
+  ];
+  return pts.some(([px, py]) => {
+    const wx = x + px * cos - py * sin;
+    const wy = y + px * sin + py * cos;
+    return Math.abs(wx - cat.x) < halfW && Math.abs(wy - cat.y) < halfH;
+  });
+}
+
 interface DebrisParticle {
   x: number;
   y: number;
@@ -82,6 +114,8 @@ interface DebrisParticle {
   vAngle: number;
   color: string;
   life: number;
+  /** Dust puffs fade and expand instead of tumbling like wood splinters. */
+  dust?: boolean;
 }
 
 export const GameCanvas: React.FC<GameCanvasProps> = ({
@@ -163,6 +197,24 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         });
       }
 
+      // Dust cloud alongside the splinters, so a break reads as an impact
+      // rather than just wood changing shape.
+      for (let i = 0; i < 14; i++) {
+        newParticles.push({
+          x: x + (Math.random() - 0.5) * width * 0.7,
+          y: y + (Math.random() - 0.5) * height * 2,
+          vx: (Math.random() - 0.5) * 3.2,
+          vy: -Math.random() * 2.2 - 0.4,
+          w: 7 + Math.random() * 14,
+          h: 7 + Math.random() * 14,
+          angle: 0,
+          vAngle: 0,
+          color: 'rgba(226, 214, 196, 0.75)',
+          life: 1.0,
+          dust: true,
+        });
+      }
+
       particlesRef.current = [...particlesRef.current, ...newParticles];
       triggerShake(10);
     });
@@ -239,14 +291,31 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       ctx.save();
       ctx.scale(dpr, dpr);
 
-      // Sky background — matches the claymation ground art's sky-blue tone instead
-      // of a flat white/pale panel, with a bit of depth toward the horizon.
+      // Sky: deep at altitude, warming toward a hazy horizon so tall levels read
+      // as genuinely high up rather than a flat colour field.
       const skyGradient = ctx.createLinearGradient(0, 0, 0, height);
-      skyGradient.addColorStop(0, '#5FADD9');
-      skyGradient.addColorStop(0.55, '#8FCBEA');
-      skyGradient.addColorStop(1, '#D9EFFA');
+      skyGradient.addColorStop(0, '#3E93C9');
+      skyGradient.addColorStop(0.35, '#69B4DF');
+      skyGradient.addColorStop(0.72, '#A5D6EE');
+      skyGradient.addColorStop(1, '#E4F3FB');
       ctx.fillStyle = skyGradient;
       ctx.fillRect(0, 0, width, height);
+
+      // Soft sun high on the left, then a warm haze band sitting on the horizon.
+      const sunX = width * 0.22;
+      const sunY = height * 0.14;
+      const sun = ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, width * 0.55);
+      sun.addColorStop(0, 'rgba(255, 246, 214, 0.55)');
+      sun.addColorStop(0.28, 'rgba(255, 240, 200, 0.16)');
+      sun.addColorStop(1, 'rgba(255, 240, 200, 0)');
+      ctx.fillStyle = sun;
+      ctx.fillRect(0, 0, width, height);
+
+      const haze = ctx.createLinearGradient(0, height * 0.62, 0, height);
+      haze.addColorStop(0, 'rgba(255, 249, 232, 0)');
+      haze.addColorStop(1, 'rgba(255, 246, 226, 0.5)');
+      ctx.fillStyle = haze;
+      ctx.fillRect(0, height * 0.62, width, height * 0.38);
 
       // Apply Camera View Transforms (Zoom & Pan) plus decaying impact shake
       let shakeX = 0;
@@ -264,6 +333,12 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       ctx.scale(zoomLevel, zoomLevel);
 
       // --- 1. DRAW WORLD BACKGROUND ---
+      // Clouds drift slowly so the sky is alive without pulling focus.
+      const driftT = performance.now() / 1000;
+      cloudsRef.current.forEach((c, i) => {
+        c.x += (0.09 + (i % 3) * 0.035) * Math.sin(driftT * 0.05 + i) * 0.5 + 0.055 + (i % 3) * 0.02;
+        if (c.x > currentLevel.worldWidth + 140) c.x = -140;
+      });
       drawClouds(ctx, cloudsRef.current);
 
       // --- 2. DRAW GROUND ---
@@ -309,21 +384,37 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           const p = particlesRef.current[i];
           p.x += p.vx;
           p.y += p.vy;
-          p.vy += gravity;
-          p.angle += p.vAngle;
-          p.life -= 0.022;
+          if (p.dust) {
+            p.vx *= 0.94;
+            p.vy = p.vy * 0.94 - 0.05; // drifts upward as it dissipates
+            p.life -= 0.03;
+          } else {
+            p.vy += gravity;
+            p.angle += p.vAngle;
+            p.life -= 0.022;
+          }
 
           if (p.life > 0) {
             nextParticles.push(p);
 
             ctx.save();
             ctx.translate(p.x, p.y);
-            ctx.rotate(p.angle);
-            ctx.globalAlpha = Math.max(0, p.life);
-            ctx.fillStyle = p.color;
-            ctx.beginPath();
-            ctx.roundRect(-p.w / 2, -p.h / 2, p.w, p.h, 1);
-            ctx.fill();
+            if (p.dust) {
+              // Puffs swell and fade rather than tumbling
+              const grow = 1 + (1 - p.life) * 1.5;
+              ctx.globalAlpha = Math.max(0, p.life) * 0.5;
+              ctx.fillStyle = p.color;
+              ctx.beginPath();
+              ctx.arc(0, 0, (p.w / 2) * grow, 0, Math.PI * 2);
+              ctx.fill();
+            } else {
+              ctx.rotate(p.angle);
+              ctx.globalAlpha = Math.max(0, p.life);
+              ctx.fillStyle = p.color;
+              ctx.beginPath();
+              ctx.roundRect(-p.w / 2, -p.h / 2, p.w, p.h, 1);
+              ctx.fill();
+            }
             ctx.restore();
           }
         }
@@ -332,6 +423,16 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       }
 
       ctx.restore(); // Restore camera transform
+
+      // Gentle vignette to seat the scene and stop the corners feeling flat.
+      const vignette = ctx.createRadialGradient(
+        width / 2, height * 0.52, Math.min(width, height) * 0.35,
+        width / 2, height * 0.52, Math.max(width, height) * 0.78
+      );
+      vignette.addColorStop(0, 'rgba(0, 20, 40, 0)');
+      vignette.addColorStop(1, 'rgba(0, 20, 40, 0.28)');
+      ctx.fillStyle = vignette;
+      ctx.fillRect(0, 0, width, height);
 
       ctx.restore(); // Restore dpr transform
 
@@ -450,6 +551,13 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       newX = Math.max(40, Math.min(currentLevel.worldWidth - 40, newX));
       newY = Math.max(60, Math.min(currentLevel.groundY - 10, newY));
 
+      // Refuse positions that overlap the cat rather than allowing a placement
+      // that would fail instantly on START.
+      const plank = placedPlanks.find((p) => p.id === selectedPlankId);
+      if (plank && overlapsCat(newX, newY, plank.angle, plank.width, plank.height, currentLevel.cat)) {
+        return;
+      }
+
       onUpdatePlankPosition(selectedPlankId, newX, newY);
     } else if (isPanning) {
       const deltaX = e.clientX - dragStartPos.x;
@@ -567,6 +675,27 @@ function drawBall(ctx: CanvasRenderingContext2D, ball: Matter.Body) {
   const material: 'stone' | 'iron' = (ball as any).customData?.material === 'iron' ? 'iron' : 'stone';
   const sprite = BOULDER_SPRITES[material];
 
+  // Motion streak once it is genuinely moving, so speed reads at a glance.
+  const speed = Math.hypot(ball.velocity.x, ball.velocity.y);
+  if (speed > 4) {
+    const len = Math.min(radius * 3.4, speed * 5);
+    const nx = ball.velocity.x / speed;
+    const ny = ball.velocity.y / speed;
+    ctx.save();
+    ctx.rotate(-ball.angle); // streak follows world motion, not the body's spin
+    const trail = ctx.createLinearGradient(0, 0, -nx * len, -ny * len);
+    trail.addColorStop(0, 'rgba(255,255,255,0.30)');
+    trail.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = trail;
+    ctx.beginPath();
+    ctx.moveTo(-ny * radius * 0.85, nx * radius * 0.85);
+    ctx.lineTo(ny * radius * 0.85, -nx * radius * 0.85);
+    ctx.lineTo(-nx * len, -ny * len);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
   if (isReady(sprite)) {
     // Claymation boulder sprite (rotation-safe: a sphere reads correctly from any angle)
     ctx.drawImage(sprite, -radius, -radius, radius * 2, radius * 2);
@@ -608,7 +737,7 @@ function drawCat(
   if (isReady(CAT_SPRITE)) {
     // Sprite art is drawn a little larger than the hitbox and anchored so its
     // feet sit on the ground line rather than centred on the box.
-    const drawW = catWidth * 1.55;
+    const drawW = catWidth * 1.75;
     const drawH = (CAT_SPRITE.naturalHeight / CAT_SPRITE.naturalWidth) * drawW;
     ctx.drawImage(CAT_SPRITE, -drawW / 2, catHeight / 2 - drawH, drawW, drawH);
     ctx.restore();
@@ -812,16 +941,37 @@ function drawPhysicsPlank(
   ctx.lineWidth = 2.5;
   ctx.stroke();
 
-  // If cracked, draw jagged crack lines overlay
+  // Damage overlay: a branching split across the grain plus a darkened core, so
+  // a weakened plank is obvious before it finally snaps.
   if (isCracked) {
-    ctx.strokeStyle = '#1B1B1F';
-    ctx.lineWidth = 2.5;
-    ctx.beginPath();
-    ctx.moveTo(-10, -h / 2);
-    ctx.lineTo(-2, -2);
-    ctx.lineTo(4, 2);
-    ctx.lineTo(0, h / 2);
-    ctx.stroke();
+    ctx.save();
+    ctx.globalAlpha = 0.85;
+    ctx.strokeStyle = 'rgba(20, 12, 8, 0.9)';
+    ctx.lineWidth = 2.2;
+    ctx.lineCap = 'round';
+    const seed = (data.plankId || '').length;
+    for (let i = -1; i <= 1; i++) {
+      const cx = (w / 4) * i + ((seed % 3) - 1) * 6;
+      ctx.beginPath();
+      ctx.moveTo(cx - 4, -h / 2);
+      ctx.lineTo(cx + 3, -h * 0.1);
+      ctx.lineTo(cx - 2, h * 0.15);
+      ctx.lineTo(cx + 5, h / 2);
+      ctx.stroke();
+    }
+    // Fine hairlines branching off the main splits
+    ctx.lineWidth = 1;
+    ctx.globalAlpha = 0.5;
+    for (let i = -1; i <= 1; i++) {
+      const cx = (w / 4) * i;
+      ctx.beginPath();
+      ctx.moveTo(cx + 3, -h * 0.1);
+      ctx.lineTo(cx + 14, -h * 0.3);
+      ctx.moveTo(cx - 2, h * 0.15);
+      ctx.lineTo(cx - 13, h * 0.34);
+      ctx.stroke();
+    }
+    ctx.restore();
   }
 
   ctx.restore();

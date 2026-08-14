@@ -456,41 +456,35 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                 <div>
                   <h2 className="text-2xl font-extrabold">SHELTER FAILED</h2>
                   <p className="text-sm text-white/60 mt-1">
-                    The boulder reached the cat. Back to level 1.
+                    {simulationStats.catHurtCause === 'ball'
+                      ? 'The boulder got through to the cat.'
+                      : simulationStats.catHurtCause === 'fragment'
+                      ? 'Flying debris struck the cat.'
+                      : 'Your own shelter came down on the cat.'}{' '}
+                    The run restarts from level 1.
                   </p>
                 </div>
 
                 <div className="bg-white/5 rounded-2xl p-3 space-y-1.5 text-sm text-white/70">
                   <div className="flex justify-between">
-                    <span>Impact taken</span>
-                    <b className="text-[#FF6B6B] tabular-nums">{simulationStats.catImpactForce} N</b>
+                    <span>Level reached</span>
+                    <b className="text-white tabular-nums">{currentLevel.id}</b>
                   </div>
                   <div className="flex justify-between">
-                    <span>Cat tolerance</span>
-                    <b className="text-white tabular-nums">{currentLevel.cat.maxDamageForce} N</b>
+                    <span>Planks used</span>
+                    <b className="text-white tabular-nums">{placedPlanks.length}</b>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2.5">
-                  <button
-                    onClick={() => {
-                      playClick();
-                      onResetLevel();
-                    }}
-                    className="h-12 rounded-2xl border border-white/25 hover:bg-white/10 font-bold text-sm transition active:scale-95 flex items-center justify-center gap-1.5"
-                  >
-                    <RotateCcw className="w-4 h-4" /> Retry
-                  </button>
-                  <button
-                    onClick={() => {
-                      playClick();
-                      onRestartRun();
-                    }}
-                    className="h-12 rounded-2xl bg-[#005AC1] hover:bg-[#004395] font-bold text-sm transition active:scale-95 shadow-lg"
-                  >
-                    Level 1
-                  </button>
-                </div>
+                <button
+                  onClick={() => {
+                    playClick();
+                    onRestartRun();
+                  }}
+                  className="w-full h-12 rounded-2xl bg-[#005AC1] hover:bg-[#004395] font-bold text-sm transition active:scale-[0.98] shadow-lg flex items-center justify-center gap-2"
+                >
+                  <RotateCcw className="w-4 h-4" /> Back to level 1
+                </button>
               </>
             )}
           </div>
