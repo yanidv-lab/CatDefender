@@ -46,6 +46,17 @@ export function plankPrice(woodType: WoodType): number {
 }
 
 /**
+ * Coin cost to retry the level you just failed instead of restarting the run.
+ *
+ * Scaled off the level's own reward so a retry always costs meaningfully less
+ * than clearing the level pays — retrying and succeeding stays net positive,
+ * while repeated failures still drain the purse and eventually force a restart.
+ */
+export function retryCost(levelReward: number): number {
+  return Math.max(50, Math.round((levelReward * 0.4) / 10) * 10);
+}
+
+/**
  * Score for clearing a level: the level's own reward plus an efficiency bonus
  * that shrinks with each plank used, so the cheapest shelter that survives
  * scores highest.

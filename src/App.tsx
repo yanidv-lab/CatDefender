@@ -4,7 +4,7 @@ import { GAME_LEVELS } from './entities/levels';
 import { GameCanvas } from './render/GameCanvas';
 import { GameHUD } from './render/GameHUD';
 import { LevelData, SimulationStats, WoodType } from './entities/types';
-import { STARTING_POINTS, calculateLevelScore, plankPrice } from './entities/economy';
+import { STARTING_POINTS, calculateLevelScore, plankPrice, retryCost } from './entities/economy';
 import { soundManager, SoundType } from './engine/soundEffects';
 import { triggerHaptic, setHapticsEnabled } from './engine/haptics';
 import { MainMenu, MenuScreen } from './render/MainMenu';
@@ -296,6 +296,18 @@ export const App: React.FC = () => {
     setHasRun(true);
   };
 
+  /**
+   * Pay the fee and take the same level again, keeping the run alive. The planks
+   * from the failed attempt are not refunded — they broke — so a retry costs the
+   * fee on top of whatever the attempt already consumed.
+   */
+  const handleRetryLevel = () => {
+    const fee = retryCost(currentLevel.reward);
+    if (points < fee) return;
+    setPoints((p) => p - fee);
+    loadLevel(currentLevel.id);
+  };
+
   const handleNewGame = () => {
     handleRestartRun();
     setScreen('GAME');
@@ -387,6 +399,8 @@ export const App: React.FC = () => {
         onReplay={handleReplay}
         onNextLevel={handleNextLevel}
         onRestartRun={handleRestartRun}
+        onRetryLevel={handleRetryLevel}
+        retryCost={retryCost(currentLevel.reward)}
         onOpenMenu={() => {
           setMenuScreen('MENU');
           setScreen('MENU');

@@ -50,6 +50,8 @@ interface GameHUDProps {
   onReplay: () => void;
   onNextLevel: () => void;
   onRestartRun: () => void;
+  onRetryLevel: () => void;
+  retryCost: number;
   onOpenMenu: () => void;
 }
 
@@ -72,6 +74,8 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   onReplay,
   onNextLevel,
   onRestartRun,
+  onRetryLevel,
+  retryCost,
   onOpenMenu,
 }) => {
   const [isSoundOn, setIsSoundOn] = useState(true);
@@ -460,8 +464,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                       ? 'The boulder got through to the cat.'
                       : simulationStats.catHurtCause === 'fragment'
                       ? 'Flying debris struck the cat.'
-                      : 'Your own shelter came down on the cat.'}{' '}
-                    The run restarts from level 1.
+                      : 'Your own shelter came down on the cat.'}
                   </p>
                 </div>
 
@@ -476,15 +479,48 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                   </div>
                 </div>
 
-                <button
-                  onClick={() => {
-                    playClick();
-                    onRestartRun();
-                  }}
-                  className="w-full h-12 rounded-2xl bg-[#005AC1] hover:bg-[#004395] font-bold text-sm transition active:scale-[0.98] shadow-lg flex items-center justify-center gap-2"
-                >
-                  <RotateCcw className="w-4 h-4" /> Back to level 1
-                </button>
+                <div className="flex flex-col gap-2.5">
+                  <button
+                    onClick={() => {
+                      if (points < retryCost) return;
+                      playClick();
+                      onRetryLevel();
+                    }}
+                    disabled={points < retryCost}
+                    className={`w-full h-12 rounded-2xl font-bold text-sm transition shadow-lg flex items-center justify-center gap-2 ${
+                      points >= retryCost
+                        ? 'bg-[#005AC1] hover:bg-[#004395] active:scale-[0.98]'
+                        : 'bg-white/10 text-white/40 cursor-not-allowed'
+                    }`}
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                    Retry level {currentLevel.id}
+                    <span
+                      className={`flex items-center gap-1 tabular-nums ${
+                        points >= retryCost ? 'text-[#FFD54F]' : 'text-white/40'
+                      }`}
+                    >
+                      <CoinsIcon className="w-3.5 h-3.5" />
+                      {retryCost}
+                    </span>
+                  </button>
+
+                  {points < retryCost && (
+                    <p className="text-xs text-white/45 -mt-0.5">
+                      Not enough coins to retry — you have {points}.
+                    </p>
+                  )}
+
+                  <button
+                    onClick={() => {
+                      playClick();
+                      onRestartRun();
+                    }}
+                    className="w-full h-11 rounded-2xl border border-white/25 hover:bg-white/10 font-semibold text-sm transition active:scale-[0.98]"
+                  >
+                    Start over from level 1
+                  </button>
+                </div>
               </>
             )}
           </div>
