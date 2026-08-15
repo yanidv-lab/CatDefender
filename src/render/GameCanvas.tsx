@@ -678,18 +678,21 @@ function drawBall(ctx: CanvasRenderingContext2D, ball: Matter.Body) {
   // Motion streak once it is genuinely moving, so speed reads at a glance.
   const speed = Math.hypot(ball.velocity.x, ball.velocity.y);
   if (speed > 4) {
-    const len = Math.min(radius * 3.4, speed * 5);
+    const len = Math.min(radius * 2.2, speed * 3.2);
     const nx = ball.velocity.x / speed;
     const ny = ball.velocity.y / speed;
     ctx.save();
     ctx.rotate(-ball.angle); // streak follows world motion, not the body's spin
+    // Very low alpha and sky-tinted. At white/0.30 this read as a hard pale
+    // wedge stuck above the boulder rather than motion, which is exactly the
+    // pasted-on look the sprites were just cleaned of.
     const trail = ctx.createLinearGradient(0, 0, -nx * len, -ny * len);
-    trail.addColorStop(0, 'rgba(255,255,255,0.30)');
-    trail.addColorStop(1, 'rgba(255,255,255,0)');
+    trail.addColorStop(0, 'rgba(226,242,252,0.13)');
+    trail.addColorStop(1, 'rgba(226,242,252,0)');
     ctx.fillStyle = trail;
     ctx.beginPath();
-    ctx.moveTo(-ny * radius * 0.85, nx * radius * 0.85);
-    ctx.lineTo(ny * radius * 0.85, -nx * radius * 0.85);
+    ctx.moveTo(-ny * radius * 0.55, nx * radius * 0.55);
+    ctx.lineTo(ny * radius * 0.55, -nx * radius * 0.55);
     ctx.lineTo(-nx * len, -ny * len);
     ctx.closePath();
     ctx.fill();
